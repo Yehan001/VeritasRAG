@@ -15,21 +15,18 @@ class LeetspeakDetector:
 
         normalized = text.lower()
 
-        # Replace leetspeak chars
+        # Replace leetspeak characters
         for leet_char, normal_char in self.leet_map.items():
             normalized = normalized.replace(leet_char, normal_char)
 
-        # Add regex obfuscation patterns
-        normalized = re.sub(r'[\s\-_\.]+', '', normalized)
+        # Replace suspicious separators with spaces
+        normalized = re.sub(r'[-_.]+', ' ', normalized)
 
-        # Remove separators
-        normalized = re.sub(r'[\-_.]', '', normalized)
-
-        # Remove extra symbols
+        # Remove special characters but preserve spaces
         normalized = re.sub(r'[^a-zA-Z0-9\s]', '', normalized)
 
-        # Handle repeated characters (e.g., "h4ckkk" -> "hack")
-        normalized = re.sub(r'(.)\1+', r'\1', normalized)
+        # Normalize multiple spaces
+        normalized = re.sub(r'\s+', ' ', normalized).strip()
 
         return normalized
 

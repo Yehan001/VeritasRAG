@@ -28,7 +28,15 @@ import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
 
-from input_guardrail_question_only_FIXED import InputGuardrail
+# MODIFIED - import the question-only guardrail and the PII masking helper function from the fixed guardrail module.
+# Reason:
+# InputGuardrail protects the retrieval/LLM pipeline, but the Streamlit UI
+# and CSV export can still leak the raw original question if we display/export
+# it directly. mask_pii is used here to hide PII before showing/exporting.
+from input_guardrail_question_only_FIXED import InputGuardrail, mask_pii
+
+# Option B pipeline:
+# FAISS retrieval + answer generation + statement-level faithfulness checking.
 from final_option_b_faithfulness_filter_FINAL import OptimizedRAGFaithfulnessChecker
 
 load_dotenv()
@@ -127,6 +135,45 @@ st.markdown(
 def safe(text: str) -> str:
     return html.escape(text or "")
 
+# MODIFIED -
+# Helper functions for UI/export privacy.
+# These prevent raw PII from appearing on screen or inside the CSV export.
+def mask_question_for_display(text: str) -> str:
+    """
+    Mask PII before displaying or exporting the original user question.
+
+    Important:
+    This is only for UI/export privacy.
+    The actual pipeline still uses q_result.sanitized_question after the
+    guardrail has processed the question.
+
+    Example:
+        "What is the policy for john@gmail.com?"
+        -> "What is the policy for [EMAIL]?"
+    """
+    masked_text, _ = mask_pii(text or "")
+    return masked_text
+
+# MODIFIED - helper to check if PII masking was applied based on the filter log, for UI display purposes.
+def pii_masking_applied(filter_log: list[str]) -> bool:
+    """
+    Returns True if PII masking happened inside the guardrail sanitizer.
+    """
+    return any("pii masked" in item.lower() for item in filter_log)
+
+# MODIFIED - helper to extract and format PII masking log entries for UI display, showing which types of PII were masked.
+def pii_masking_log(filter_log: list[str]) -> str:
+    """
+    Return only privacy-safe PII log entries.
+
+    The filter log contains PII type names, not actual PII values.
+    Example:
+        "PII masked: email address, phone number"
+    """
+    return " | ".join(
+        item for item in filter_log
+        if "pii masked" in item.lower()
+    )
 
 def extract_txt(file) -> str:
     return file.read().decode("utf-8", errors="ignore")
@@ -154,11 +201,25 @@ def extract_text(uploaded_file) -> str:
         return extract_docx(uploaded_file)
     return ""
 
-
+# MODIFIED - 
+# Updated this function so the raw original question is never displayed.
+# Instead, the original question is masked again before rendering.
 def render_guardrail_result(q_result, original_question: str) -> None:
+    """
+    Render question guardrail result.
+
+    PII PRIVACY FIX:
+    The original question may contain sensitive data.
+    Therefore, the UI shows a masked version of the original question instead
+    of the raw user input.
+    """
     st.markdown('<div class="section-title">1) Question Guardrail Result</div>', unsafe_allow_html=True)
 
-    risk_cls = q_result.risk_level.lower()
+    # The raw original question may contain emails, phone numbers, NICs, cards, addresses, IPs, etc. Do not display it directly.
+    # This does not affect pipeline logic. The real pipeline uses
+    # q_result.sanitized_question after the guardrail has processed it.
+    display_original_question = mask_question_for_display(original_question)
+
     if q_result.passed:
         if q_result.warned_checks:
             st.markdown(
@@ -188,15 +249,29 @@ def render_guardrail_result(q_result, original_question: str) -> None:
         for warning in q_result.warnings:
             st.markdown(f'<div class="warn-box">⚠️ {safe(warning)}</div>', unsafe_allow_html=True)
 
+    # MODIFIED - 
+    # PII PRIVACY FIX:
+    # Do not render raw original_question here.
+    # Show masked original question instead.
     st.markdown("**Question — before and after sanitization:**")
-    st.markdown('<div class="q-label">Original</div>', unsafe_allow_html=True)
-    st.markdown(f'<div class="q-box">{safe(original_question)}</div>', unsafe_allow_html=True)
+
+    st.markdown('<div class="q-label">Original question masked for privacy</div>', unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="q-box">{safe(display_original_question)}</div>', 
+        unsafe_allow_html=True,
+    )
 
     st.markdown('<div class="q-label">Sanitized question sent to Option B</div>', unsafe_allow_html=True)
     if q_result.passed:
-        st.markdown(f'<div class="q-box" style="border-color:#1f6feb">{safe(q_result.sanitized_question)}</div>', unsafe_allow_html=True)
+        st.markdown(
+            f'<div class="q-box" style="border-color:#1f6feb">{safe(q_result.sanitized_question)}</div>',
+            unsafe_allow_html=True,
+        )
     else:
-        st.markdown('<div class="q-box" style="border-color:#f85149">Blocked — nothing sent to retrieval/LLM</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="q-box" style="border-color:#f85149">Blocked — nothing sent to retrieval/LLM</div>',
+            unsafe_allow_html=True,
+        )
 
     # ── HTML Attack Warning Block ─────────────────────────────────────────────
     html_attacks_detected = any(
@@ -223,6 +298,10 @@ def render_guardrail_result(q_result, original_question: str) -> None:
             unsafe_allow_html=True,
         )
 
+    # MODIFIED - added a new block to check for PII masking in the filter log 
+    # and display which types of PII were masked, 
+    # without showing any raw PII values in the UI.
+
     # ── PII Masking Warning Block ────────────────────────────────────────────
     pii_log_items = [item for item in q_result.filter_log if "pii masked" in item.lower()]
 
@@ -231,22 +310,28 @@ def render_guardrail_result(q_result, original_question: str) -> None:
             '<div class="pii-title">🟡 Personal Information (PII) Detected & Masked</div>',
             unsafe_allow_html=True,
         )
-        # Map each masked PII type to a friendly label and token
+
+        # Map each masked PII type to a friendly label and token.
+        # These labels must match the labels returned by mask_pii().
         pii_labels = {
-            "email address"      : ("📧", "Email address",       "[EMAIL]"),
-            "phone number (lk)"  : ("📞", "Phone number (LK)",   "[PHONE]"),
-            "phone number"       : ("📞", "Phone number",        "[PHONE]"),
-            "nic number"         : ("🪪", "NIC number",          "[NIC]"),
-            "credit card number" : ("💳", "Credit card number",  "[CARD]"),
-            "passport number"    : ("🛂", "Passport number",     "[PASSPORT]"),
-            "bank account number": ("🏦", "Bank account number", "[BANK_ACCOUNT]"),
-            "address/location detail": ("📍", "Address/location", "[ADDRESS]"),
+            "email address"           : ("📧", "Email address", "[EMAIL]"),
+            "phone number (lk)"       : ("📞", "Phone number (LK)", "[PHONE]"),
+            "phone number"            : ("📞", "Phone number", "[PHONE]"),
+            "nic number"              : ("🪪", "NIC number", "[NIC]"),
+            "credit card number"      : ("💳", "Credit card number", "[CARD]"),
+            "passport number"         : ("🛂", "Passport number", "[PASSPORT]"),
+            "bank account number"     : ("🏦", "Bank account number", "[BANK_ACCOUNT]"),
+            "address/location detail" : ("📍", "Address/location", "[ADDRESS]"),
+            "ip address"              : ("🌐", "IP address", "[IP_ADDRESS]"),
+            "mac address"             : ("🖥️", "MAC address", "[MAC_ADDRESS]"),
         }
+
         for log_item in pii_log_items:
-            # Extract the masked types from the log entry
-            # log entry format: "PII masked: email address, phone number"
+            # log entry format:
+            # "PII masked: email address, phone number"
             after_colon = log_item.split(":", 1)[-1].strip().lower()
             detected_types = [t.strip() for t in after_colon.split(",")]
+
             for pii_type in detected_types:
                 if pii_type in pii_labels:
                     icon, label, token = pii_labels[pii_type]
@@ -259,6 +344,7 @@ def render_guardrail_result(q_result, original_question: str) -> None:
                         f'<div class="pii-item">⚠️ {safe(pii_type)} detected → masked</div>',
                         unsafe_allow_html=True,
                     )
+
         st.markdown(
             '<div class="pii-clean-box">✓ PII masked in question — safe version sent to retrieval and LLM</div>',
             unsafe_allow_html=True,
@@ -272,8 +358,9 @@ def render_guardrail_result(q_result, original_question: str) -> None:
     if q_result.filter_log:
         st.markdown("**Filters applied:**")
         for item in q_result.filter_log:
+            # This should contain only filter names/type labels.
+            # Do not put raw PII values in filter_log.
             st.markdown(f'<div class="filter-item">→ {safe(item)}</div>', unsafe_allow_html=True)
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Sidebar
@@ -374,6 +461,19 @@ if run:
         st.error("Please enter a question.")
         st.stop()
 
+    # MODIFIED 
+    # Create a masked version of the original question for UI and CSV only.
+    # - This is NOT sent to the LLM.
+    # - This is only used to avoid leaking raw PII on screen or in downloads.
+    # - The actual pipeline uses q_result.sanitized_question after guardrail.
+
+    display_question = mask_question_for_display(question)
+
+    # ======================= GUARDRAIL STAGE =======================
+    # The guardrail checks the raw user question, masks PII, removes unsafe
+    # input patterns, and decides whether the question can continue.
+    # ===============================================================
+
     guardrail = InputGuardrail(
         strict_mode=strict_mode,
         allow_non_english=allow_non_english,
@@ -385,15 +485,39 @@ if run:
 
     render_guardrail_result(q_result, question)
 
+    # ======================= BLOCK UNSAFE QUESTIONS =======================
+    # If the guardrail blocks the question, stop here.
+    # Nothing is sent to FAISS retrieval or to the LLM.
+    # ====================================================================
+
     if not q_result.passed:
         st.error("⛔ Pipeline stopped. The blocked question was not sent to FAISS retrieval or the LLM.")
         st.stop()
+
+    # MODIFIED 
+    # Security/privacy critical:
+    # Only the sanitized question from the guardrail is sent to Option B.
+    # Do NOT use:
+    #     question
+    #
+    # Use only:
+    #     q_result.sanitized_question
+    #
+    # This prevents raw emails, phone numbers, NICs, cards, addresses,
+    # IP addresses, and MAC addresses from reaching FAISS/retrieval/LLM.
 
     sanitized_question = q_result.sanitized_question
 
     st.markdown('<div class="section-title">2) Option B Faithfulness Pipeline Output</div>', unsafe_allow_html=True)
 
     try:
+        # ======================= OPTION B PIPELINE =======================
+        # This stage performs:
+        # 1. FAISS retrieval using the sanitized question
+        # 2. LLM answer generation
+        # 3. Statement-level faithfulness verification
+        # 4. Final answer rebuilding if unsupported statements are found
+        # ================================================================
         with st.spinner("Running FAISS retrieval + answer generation + statement verification..."):
             checker = OptimizedRAGFaithfulnessChecker(
                 api_key=None,
@@ -404,6 +528,10 @@ if run:
                 chunk_overlap=chunk_overlap,
                 top_k=top_k,
             )
+            # ======================= THIS IS CHANGED / CONFIRMED =======================
+            # The checker receives only sanitized_question.
+            # This is the correct privacy-safe flow.
+            # ========================================================================
 
             result = checker.check(
                 question=sanitized_question,
@@ -413,6 +541,10 @@ if run:
 
         st.success("Integrated pipeline completed.")
 
+        # ======================= METRICS DISPLAY =======================
+        # Show summary values from the faithfulness checker.
+        # ===============================================================
+
         c1, c2, c3, c4, c5, c6 = st.columns(6)
         c1.metric("Faithfulness", result.faithfulness_score)
         c2.metric("Verdict", result.verdict)
@@ -421,8 +553,12 @@ if run:
         c5.metric("LLM Calls", result.estimated_llm_calls)
         c6.metric("Chunks", result.chunks_indexed)
 
+    # MODIFIED 
+    # Do not show the raw original question in the caption.
+    # Use display_question where PII is already masked.
+    
         st.caption(
-            f"Original user question: {question} | "
+            f"Original user question masked for privacy: {display_question} | "
             f"Guardrail sanitized question: {sanitized_question} | "
             f"Option B normalized question: {result.normalized_question} | "
             f"Answer model: {result.answer_model} | "
@@ -473,15 +609,25 @@ if run:
 
         with tab5:
             export_df = pd.DataFrame([{
-                "original_user_question": question,
+                # MODIFIED - 
+                # for privacy, export the masked version of the original question 
+                # instead of the raw user input.
+                "original_user_question_masked": display_question,
                 "guardrail_sanitized_question": sanitized_question,
+                "pii_masking_applied": pii_masking_applied(q_result.filter_log),
+                "pii_masking_log": pii_masking_log(q_result.filter_log),
+
                 "guardrail_passed": q_result.passed,
                 "guardrail_risk_level": q_result.risk_level,
                 "guardrail_blocked_checks": " | ".join(q_result.blocked_checks),
                 "guardrail_warned_checks": " | ".join(q_result.warned_checks),
                 "guardrail_warnings": " | ".join(q_result.warnings),
+                
+                # Option B receives sanitized_question, so this should not contain raw PII.
+                # contain raw PII if the guardrail worked correctly.
                 "option_b_original_question": result.original_question,
                 "option_b_normalized_question": result.normalized_question,
+                
                 "faithfulness_score": result.faithfulness_score,
                 "verdict": result.verdict,
                 "was_cleaned": result.was_cleaned,

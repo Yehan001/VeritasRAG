@@ -27,8 +27,9 @@ Filtering layers covered
    extremist/terrorist content.
 
 4. Privacy:
-   email, phone numbers, Sri Lankan NIC, credit cards, passport numbers,
-   bank account-like patterns, address/location-like patterns.
+   email addresses, phone numbers, Sri Lankan NIC numbers, credit/debit card
+   candidates with Luhn validation, passport numbers, bank account-like
+   references, address/location-like patterns, IP addresses, and MAC addresses.
 
 5. Language & linguistics:
    non-English detection, spelling-quality warning, question-structure warning,
@@ -44,17 +45,23 @@ Design notes
 - Some quality issues only warn unless strict_mode=True.
 - Sanitization never rewrites meaning and never auto-corrects spelling.
 - The output keeps the original and sanitized question separately.
+- PII values are not stored in filter logs; only PII category names are logged.
+- Debug/string output masks the original question before displaying it.
 
-─────────────────────────────────────────────────────────────────────────────
-ADDED — HTML Attack Prevention  (_sanitize_html_attacks)
+
 ─────────────────────────────────────────────────────────────────────────────
 ADDED — PII Masking  (mask_pii  +  modified _q_privacy  +  modified check_question)
 ─────────────────────────────────────────────────────────────────────────────
 
 What was added:
-    mask_pii(text) — new function that replaces PII with safe tokens.
-    _q_privacy()   — modified to call mask_pii() instead of just detecting.
-    check_question() — modified to apply masking before all checks run.
+     mask_pii(text) — detects personal/sensitive information and replaces it
+    with safe placeholder tokens before retrieval and before any LLM call.
+
+    _q_privacy_from_filter_log(filter_log) — creates the privacy warning from
+    the sanitizer log instead of checking the already-masked sanitized question.
+
+    _luhn_valid(number) — validates credit/debit card candidates using the Luhn
+    checksum before replacing them with [CARD]. This reduces false positives.
 
 Why it was added:
     Previously PII detection only BLOCKED or WARNED the user.
@@ -70,11 +77,37 @@ What gets masked:
     Passport numbers    → [PASSPORT]
     Bank account refs   → [BANK_ACCOUNT]
     Address details     → [ADDRESS]
+    IP addresses        → [IP_ADDRESS]
+    MAC addresses       → [MAC_ADDRESS]
+
+    Important masking order:
+    1. Email address
+    2. Bank account references
+    3. Credit/debit card candidates with Luhn validation
+    4. Sri Lankan NIC
+    5. Passport number
+    6. Sri Lankan phone number
+    7. International phone number
+    8. Address/location detail
+    9. IP address
+    10. MAC address
+
+Why bank account is before NIC/card:
+    A 12-digit bank account can look like a Sri Lankan NIC, and some long
+    account numbers can look like card candidates. Bank account references are
+    masked first when account/bank keywords are present.
 
 Example:
     Input  : "what is the policy for john@gmail.com and 0771234567"
     Output : "what is the policy for [EMAIL] and [PHONE]"
     Result : question PASSES with a warning shown to user
+
+Another example:
+    Input  : "server IP is 192.168.1.1 and MAC is AA:BB:CC:DD:EE:FF"
+    Output : "server IP is [IP_ADDRESS] and MAC is [MAC_ADDRESS]"
+
+─────────────────────────────────────────────────────────────────────────────
+ADDED — HTML Attack Prevention  (_sanitize_html_attacks)
 ─────────────────────────────────────────────────────────────────────────────
 
 What was added:
@@ -287,17 +320,69 @@ class P:
         "wanker", "cock", "arse", "bollocks", "motherfucker", "fucker",
     }
 
-    EMAIL = re.compile(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b")
-    PHONE_LK = re.compile(r"\b(?:0\d{9}|\+94\d{9}|\+94[\s\-]?\d{2}[\s\-]?\d{3}[\s\-]?\d{4})\b")
-    PHONE_INTL = re.compile(r"\b(?:\+\d{1,3}[\s\-]?)?\(?\d{3}\)?[\s\-]?\d{3}[\s\-]?\d{4}\b")
-    CREDIT_CARD = re.compile(r"\b(?:\d{4}[\s\-]?){3}\d{4}\b")
-    NIC_LK = re.compile(r"\b\d{9}[vVxX]\b|\b\d{12}\b")
-    PASSPORT = re.compile(r"\b[A-Z]{1,2}\d{6,9}\b")
-    BANK_ACCOUNT_LIKE = re.compile(r"\b(?:account|acct|bank)\s*(?:no|number|#)?\s*[:\-]?\s*\d{8,18}\b", re.IGNORECASE)
+    # MODIFIED - added patterns for Sri Lankan NIC, credit cards, passports, bank accounts, and addresses.
+    # ─────────────────────────────────────────────────────────────
+    # PII PATTERNS
+
+    # These patterns detect personal/sensitive data before the
+    # question is sent to retrieval or the LLM.
+    # ─────────────────────────────────────────────────────────────
+
+    EMAIL = re.compile(
+        r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b"
+    )
+
+    # Sri Lankan phone formats:
+    # 0771234567, +94771234567, +94 77 123 4567, +94-77-123-4567
+    # Uses lookarounds instead of \b because \b does not behave well before "+".
+    PHONE_LK = re.compile(
+        r"(?<!\d)(?:0\d{9}|\+94[\s\-]?\d{2}[\s\-]?\d{3}[\s\-]?\d{4})(?!\d)"
+    )
+
+    # General international phone-like pattern.
+    # This runs after card, bank, NIC, and LK phone masking to reduce false positives.
+    PHONE_INTL = re.compile(
+        r"(?<!\d)(?:\+\d{1,3}[\s\-]?)?(?:\(?\d{2,4}\)?[\s\-]?){2,4}\d{3,4}(?!\d)"
+    )
+
+    # Sri Lankan NIC:
+    # Old format: 123456789V / 123456789X
+    # New format: 12 digits
+    NIC_LK = re.compile(
+        r"(?<!\d)(?:\d{9}[vVxX]|\d{12})(?!\d)"
+    )
+
+    # Candidate card number: 13–19 digits with spaces/hyphens allowed.
+    # Actual masking is done only after Luhn validation inside mask_pii().
+    CREDIT_CARD_CANDIDATE = re.compile(
+        r"(?<!\d)(?:\d[ -]?){13,19}(?!\d)"
+    )
+
+    PASSPORT = re.compile(
+        r"\b[A-Z]{1,2}\d{6,9}\b"
+    )
+
+    # Account references are masked when there is an account/bank keyword.
+    # This avoids masking every random long number as a bank account.
+    BANK_ACCOUNT_LIKE = re.compile(
+        r"\b(?:account|acct|bank\s*account|bank)\s*(?:no|number|#)?\s*[:\-]?\s*\d{8,18}\b",
+        re.IGNORECASE,
+    )
+
     ADDRESS_LIKE = re.compile(
         r"\b(?:no\.?|number)\s*\d+[A-Za-z]?(?:[/\-]\d+)?\s*,?\s*"
-        r"(?:[A-Za-z]+\s+){1,5}(?:road|rd|street|st|lane|mawatha|avenue|ave)\b",
+        r"(?:[A-Za-z]+\s+){1,6}"
+        r"(?:road|rd|street|st|lane|mawatha|avenue|ave|drive|dr|place|pl)\b",
         re.IGNORECASE,
+    )
+
+    # Network identifiers can be sensitive in technical/security documents.
+    IP_ADDRESS = re.compile(
+        r"\b(?:\d{1,3}\.){3}\d{1,3}\b"
+    )
+
+    MAC_ADDRESS = re.compile(
+        r"\b(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\b"
     )
 
     ENGLISH = re.compile(
@@ -410,19 +495,21 @@ class GuardrailResult:
             f"  Passed   : {len(self.passed_checks)} checks",
         ]
         if self.passed:
+            safe_original, _ = mask_pii(self.original_question)
+
             lines += [
                 dash,
-                f"  Original  : {self.original_question}",
-                f"  Sanitized : {self.sanitized_question}",
+                f"  Original masked : {safe_original}",
+                f"  Sanitized       : {self.sanitized_question}",
             ]
         lines += [sep, ""]
         return "\n".join(lines)
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # HELPERS
 # ─────────────────────────────────────────────────────────────────────────────
 
+# MODIFIED - enhanced pattern matching to return the first found match for better warning messages.
 def _match(text: str, patterns: Iterable[re.Pattern]) -> Optional[str]:
     for pattern in patterns:
         found = pattern.search(text)
@@ -430,13 +517,13 @@ def _match(text: str, patterns: Iterable[re.Pattern]) -> Optional[str]:
             return found.group(0)
     return None
 
-
+# MODIFIED - added a normalization function that applies Unicode NFKC folding and leetspeak translation to catch obfuscated attack attempts.
 def _normalized_for_attack_checks(text: str) -> str:
     # Used only for detection, not for final answer text.
     folded = unicodedata.normalize("NFKC", text).translate(HOMOGLYPH_MAP)
     return folded.translate(LEET_MAP)
 
-
+# MODIFIED - added a spelling error ratio function using pyspellchecker to catch low-quality questions.
 def _spell_rate(text: str) -> float:
     try:
         from spellchecker import SpellChecker
@@ -448,7 +535,7 @@ def _spell_rate(text: str) -> float:
         # Optional dependency. If unavailable, do not block.
         return 0.0
 
-
+# MODIFIED - enhanced language detection with a fallback to a simple English word ratio method if langdetect fails.
 def _lang(text: str) -> Tuple[str, float]:
     try:
         from langdetect import detect_langs
@@ -460,14 +547,14 @@ def _lang(text: str) -> Tuple[str, float]:
         conf = min(hits / words, 1.0)
         return ("en" if conf > 0.08 else "unknown"), round(conf, 2)
 
-
+# MODIFIED - enhanced Shannon entropy calculation for better detection of obfuscated inputs.
 def _shannon_entropy(text: str) -> float:
     if not text:
         return 0.0
     counts = {ch: text.count(ch) for ch in set(text)}
     return -sum((count / len(text)) * math.log2(count / len(text)) for count in counts.values())
 
-
+# MODIFIED - enhanced gibberish detection with vowel ratio and consonant run checks to catch more obfuscated inputs.
 def _looks_gibberish(text: str) -> bool:
     words = P.WORD.findall(text.lower())
     if len(words) < 2:
@@ -486,7 +573,7 @@ def _looks_gibberish(text: str) -> bool:
     entropy = _shannon_entropy("".join(words))
     return ratio >= Config.GIBBERISH_THRESHOLD or (len("".join(words)) > 20 and entropy > 4.2 and ratio > 0.35)
 
-
+# MODIFIED - added check for mixed-script homoglyphs to catch attempts to bypass filters using lookalike characters.
 def _contains_mixed_script_homoglyphs(text: str) -> bool:
     latin = any("LATIN" in unicodedata.name(ch, "") for ch in text if ch.isalpha())
     suspicious_script = any(
@@ -686,8 +773,6 @@ def _q_homoglyph(original: str) -> CheckResult:
             message="Question mixes Latin letters with lookalike Unicode characters, which may be a bypass attempt.",
         )
     return CheckResult("homoglyph", True)
-
-
 
 
 def _q_leetspeak_obfuscation(original: str) -> CheckResult:
@@ -897,115 +982,182 @@ def _q_safety(text: str) -> List[CheckResult]:
 
     return checks
 
-
-def mask_pii(text: str) -> tuple:
+# MODIFIED - Credit/debit card numbers can be random digits but must pass the Luhn checksum to be valid.
+def _luhn_valid(number: str) -> bool:
     """
-    ADDED — PII Masking
-    -------------------
-    Instead of just detecting and blocking/warning PII,
-    this function REPLACES detected PII with safe placeholder tokens.
+    Validate credit/debit card numbers using the Luhn checksum.
+    This reduces false positives when random 13–19 digit numbers appear.
+    """
+    digits = [int(d) for d in re.sub(r"\D", "", number)]
 
-    This allows the question to PASS and still be answered,
-    without exposing real personal data to the LLM or retrieval system.
+    if not 13 <= len(digits) <= 19:
+        return False
+
+    checksum = 0
+    parity = len(digits) % 2
+
+    for i, digit in enumerate(digits):
+        if i % 2 == parity:
+            digit *= 2
+            if digit > 9:
+                digit -= 9
+        checksum += digit
+
+    return checksum % 10 == 0
+
+
+# MODIFIED  - Stronger PII detection and masking function.
+# Added:
+# - Luhn validation for cards
+# - Bank account before NIC
+# - IP address masking
+# - MAC address masking
+# - Duplicate label prevention
+
+def mask_pii(text: str) -> tuple[str, list[str]]:
+    """
+    PII DETECTION AND MASKING LAYER
+    -------------------------------
+    Detects personal/sensitive information in the user's question and replaces
+    it with safe placeholder tokens BEFORE retrieval and BEFORE any LLM call.
+
+    Main rule:
+        Never store or return the actual PII values in logs.
+        Only return the masked text and the PII category names.
 
     Masks:
-        - Email addresses     → [EMAIL]
-        - Phone numbers       → [PHONE]
-        - Sri Lankan NIC      → [NIC]
-        - Credit card numbers → [CARD]
-        - Passport numbers    → [PASSPORT]
-        - Bank account refs   → [BANK_ACCOUNT]
-        - Address details     → [ADDRESS]
+        Email addresses        → [EMAIL]
+        Phone numbers          → [PHONE]
+        Sri Lankan NIC         → [NIC]
+        Credit/debit cards     → [CARD]
+        Passport numbers       → [PASSPORT]
+        Bank account refs      → [BANK_ACCOUNT]
+        Address/location text  → [ADDRESS]
+        IP addresses           → [IP_ADDRESS]
+        MAC addresses          → [MAC_ADDRESS]
 
     Returns:
-        (masked_text, list_of_what_was_masked)
+        (masked_text, list_of_masked_pii_type_names)
 
     Example:
-        Input  : "what is the refund policy for john@gmail.com"
-        Output : "what is the refund policy for [EMAIL]"
-                 masked = ["email address"]
-    """
-    masked = []
+        Input:
+            "What is the policy for john@gmail.com and 0771234567?"
 
-    # Mask email addresses — replace with [EMAIL]
+        Output:
+            "What is the policy for [EMAIL] and [PHONE]?"
+            ["email address", "phone number (LK)"]
+    """
+    text = "" if text is None else str(text)
+    masked_items: list[str] = []
+
+    def add_item(label: str) -> None:
+        """Avoid duplicate PII labels in the filter log."""
+        if label not in masked_items:
+            masked_items.append(label)
+
+    # 1) Email address
     if P.EMAIL.search(text):
         text = P.EMAIL.sub("[EMAIL]", text)
-        masked.append("email address")
+        add_item("email address")
 
-    # Mask Sri Lankan phone numbers — replace with [PHONE]
-    if P.PHONE_LK.search(text):
-        text = P.PHONE_LK.sub("[PHONE]", text)
-        masked.append("phone number (LK)")
-
-    # Mask international phone numbers — replace with [PHONE]
-    if P.PHONE_INTL.search(text):
-        text = P.PHONE_INTL.sub("[PHONE]", text)
-        if "phone number (LK)" not in masked:
-            masked.append("phone number")
-
-    # Mask Sri Lankan NIC numbers — replace with [NIC]
-    if P.NIC_LK.search(text):
-        text = P.NIC_LK.sub("[NIC]", text)
-        masked.append("NIC number")
-
-    # Mask credit card numbers — replace with [CARD]
-    if P.CREDIT_CARD.search(text):
-        text = P.CREDIT_CARD.sub("[CARD]", text)
-        masked.append("credit card number")
-
-    # Mask passport numbers — replace with [PASSPORT]
-    if P.PASSPORT.search(text):
-        text = P.PASSPORT.sub("[PASSPORT]", text)
-        masked.append("passport number")
-
-    # Mask bank account references — replace with [BANK_ACCOUNT]
+    # 2) Bank account references
+    # This must run before NIC masking. Otherwise, a 12-digit bank account number
+    # with an "account no" keyword can be wrongly masked as a Sri Lankan NIC.
     if P.BANK_ACCOUNT_LIKE.search(text):
         text = P.BANK_ACCOUNT_LIKE.sub("[BANK_ACCOUNT]", text)
-        masked.append("bank account number")
+        add_item("bank account number")
+        
+    # 3) Credit/debit card
+    # Use regex to find candidates, then Luhn validation to reduce false positives.
+    def replace_card(match: re.Match) -> str:
+        candidate = match.group(0)
+        if _luhn_valid(candidate):
+            add_item("credit card number")
+            return "[CARD]"
+        return candidate
 
-    # Mask address/location details — replace with [ADDRESS]
+    text = P.CREDIT_CARD_CANDIDATE.sub(replace_card, text)
+
+    # 4) Sri Lankan NIC
+    if P.NIC_LK.search(text):
+        text = P.NIC_LK.sub("[NIC]", text)
+        add_item("NIC number")
+
+    # 5) Passport number
+    if P.PASSPORT.search(text):
+        text = P.PASSPORT.sub("[PASSPORT]", text)
+        add_item("passport number")
+
+    # 6) Sri Lankan phone number
+    if P.PHONE_LK.search(text):
+        text = P.PHONE_LK.sub("[PHONE]", text)
+        add_item("phone number (LK)")
+
+    # 7) International phone number
+    # Runs after local phone masking to avoid duplicate phone labels.
+    if P.PHONE_INTL.search(text):
+        text = P.PHONE_INTL.sub("[PHONE]", text)
+        add_item("phone number")
+
+    # 8) Address/location detail
     if P.ADDRESS_LIKE.search(text):
         text = P.ADDRESS_LIKE.sub("[ADDRESS]", text)
-        masked.append("address/location detail")
+        add_item("address/location detail")
 
-    return text, masked
+    # 9) IP address
+    if P.IP_ADDRESS.search(text):
+        text = P.IP_ADDRESS.sub("[IP_ADDRESS]", text)
+        add_item("IP address")
 
+    # 10) MAC address
+    if P.MAC_ADDRESS.search(text):
+        text = P.MAC_ADDRESS.sub("[MAC_ADDRESS]", text)
+        add_item("MAC address")
 
-def _q_privacy(text: str) -> CheckResult:
+    return text, masked_items
+
+# MODIFIED - 
+# Privacy warning is now generated from filter_log.
+# Reason:
+# PII has already been masked inside sanitize(), so checking the sanitized text
+# again may not find the original PII.
+# ===============================================================
+
+def _q_privacy_from_filter_log(filter_log: List[str]) -> CheckResult:
     """
-    MODIFIED — PII Masking (was: PII Detection only)
-    -------------------------------------------------
-    Previously this function only DETECTED PII and returned a warning/block.
-    Now it calls mask_pii() which REPLACES PII with safe tokens first.
+    Builds the privacy warning based on the sanitizer log.
 
-    Change:
-        Before : detected PII → blocked question or warned user
-        After  : detected PII → masked in text → question still passes
-                 user is warned that PII was masked, not blocked
+    Why this is needed:
+    PII is masked inside sanitize() before other checks run. Therefore, checking
+    the sanitized text again may not find the original PII. The filter log is
+    the correct source for deciding whether a privacy warning should be shown.
 
-    Why:
-        Blocking users just because their question contained an email or
-        phone number is too aggressive. Masking lets the question through
-        safely while still protecting personal data from reaching the LLM.
+    Important:
+    The filter log must contain only PII type names, not actual PII values.
     """
-    # Mask PII in the text and get list of what was masked
-    masked_text, masked_items = mask_pii(text)
+    pii_entries = [
+        item for item in filter_log
+        if item.lower().startswith("pii masked:")
+    ]
 
-    if masked_items:
-        # PII was found and masked — warn the user but still pass
+    if pii_entries:
+        detected = " | ".join(
+            item.split(":", 1)[1].strip()
+            for item in pii_entries
+            if ":" in item
+        )
+
         return CheckResult(
-            "pii_masked",                          # check name changed from pii_detected
-            True,                                  # passed = True (not blocked)
-            warning=True,                          # warn user about masking
+            "pii_masked",
+            True,
+            warning=True,
             message=(
-                f"Personal information detected and masked: {', '.join(masked_items)}. "
-                f"Your question was modified to remove personal data before processing."
+                "Personal information detected and masked before processing: "
+                f"{detected}."
             ),
         )
 
-    # No PII found — clean pass
     return CheckResult("privacy", True)
-
 
 def _q_language(text: str) -> CheckResult:
     lang, conf = _lang(text)
@@ -1097,7 +1249,7 @@ _HIGH_RISK = {
     "extremism", "hate_speech", "homoglyph_attack", "leetspeak_obfuscation", "social_engineering",
 }
 _MEDIUM_RISK = {
-    "profanity", "pii_detected", "non_english", "too_long", "out_of_scope",
+    "profanity", "pii_masked", "non_english", "too_long", "out_of_scope",
     "roleplay_or_pretend", "unrelated_opinion_prediction", "gibberish",
 }
 
@@ -1187,12 +1339,15 @@ class InputGuardrail:
         # before the HTML attack cleaner. No need to mask again here.
         # filter_log already contains PII masking entries from sanitize().
 
+        # MODIFIED - Run leetspeak check on sanitized text instead of raw original text.
+        # This reduces false warnings from emails, phone numbers, and card numbers.
+
         checks: List[CheckResult] = [
             _q_empty(original),
             _q_nonprintable(original),
             _q_unicode_abuse(original),
             _q_homoglyph(original),
-            _q_leetspeak_obfuscation(original), 
+            _q_leetspeak_obfuscation(sanitized), 
             _q_length(sanitized),
             _q_repeated_chars(sanitized),
             _q_real_words(sanitized),
@@ -1204,9 +1359,11 @@ class InputGuardrail:
 
         checks.extend(_q_security(sanitized, original))
         checks.extend(_q_safety(_normalized_for_attack_checks(original)))
-        # MODIFIED — _q_privacy now warns about masking instead of blocking
-        checks.append(_q_privacy(sanitized))
-
+        
+        # MODIFIED —  
+        # Use filter_log to create the PII warning.
+        # Do not try to detect PII again in the already-sanitized question.
+        checks.append(_q_privacy_from_filter_log(filter_log)) 
         if self.non_eng_ok:
             checks.append(CheckResult("language", True))
         else:

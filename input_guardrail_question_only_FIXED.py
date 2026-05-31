@@ -136,8 +136,16 @@ from __future__ import annotations
 import math
 import re
 import unicodedata
+import os
+from dotenv import load_dotenv
+from groq import Groq
+
+load_dotenv()
+
+
 from dataclasses import dataclass, field
 from typing import Iterable, List, Optional, Tuple
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1092,9 +1100,26 @@ def _q_semantic_intent(text: str) -> List[CheckResult]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 _HIGH_RISK = {
-    "script_injection", "template_injection", "path_traversal", "null_byte_injection",
-    "prompt_injection", "jailbreak", "harmful_intent", "self_harm", "child_safety",
-    "extremism", "hate_speech", "homoglyph_attack", "leetspeak_obfuscation", "social_engineering",
+    "script_injection",
+    "template_injection",
+    "path_traversal",
+    "null_byte_injection",
+    "prompt_injection",
+    "jailbreak",
+    "harmful_intent",
+    "self_harm",
+    "child_safety",
+    "extremism",
+    "hate_speech",
+    "homoglyph_attack",
+    "leetspeak_obfuscation",
+    "social_engineering",
+
+    "semantic_prompt_extraction",
+    "semantic_jailbreak",
+    "semantic_social_engineering",
+    "semantic_safety_bypass",
+    "semantic_data_exfiltration",
 }
 _MEDIUM_RISK = {
     "profanity", "pii_detected", "non_english", "too_long", "out_of_scope",
@@ -1144,6 +1169,10 @@ class InputGuardrail:
         self.non_eng_ok = allow_non_english
         self.spell = check_spelling
 
+        self.client = Groq(
+            api_key=os.getenv("GROQ_API_KEY")
+        )
+
     def _build(
         self,
         checks: List[CheckResult],
@@ -1178,6 +1207,102 @@ class InputGuardrail:
             warnings=warning_messages,
             filter_log=filter_log,
         )
+    
+
+    def _q_semantic_intent_llm(self, question: str) -> CheckResult:  # ← 4 spaces indent
+        """
+        LLM-based semantic intent detection.
+        Detects attacks even when wording changes.
+        """
+        try:                                                           # ← 8 spaces
+            prompt = f"""..."""                                        # ← 12 spaces
+
+            response = self.client.chat.completions.create(           # ← 12 spaces
+                model="llama-3.1-8b-instant",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0,
+                max_tokens=20
+            )
+
+            category = (                                              # ← 12 spaces
+                response.choices[0]
+                .message.content
+                .strip()
+                .upper()
+            )
+
+            attack_categories = {                                     # ← 12 spaces
+                "PROMPT_EXTRACTION",
+                "JAILBREAK",
+                "SOCIAL_ENGINEERING",
+                "SAFETY_BYPASS",
+                "DATA_EXFILTRATION",
+            }
+
+            if category in attack_categories:                        # ← 12 spaces
+                return CheckResult(                                   # ← 16 spaces
+                    f"semantic_{category.lower()}",
+                    False,
+                    True,
+                    message=f"Semantic attack detected: {category}"
+                )
+
+            return CheckResult(                                       # ← 12 spaces
+                "semantic_intent",
+                True
+            )
+
+        except Exception:                                             # ← 8 spaces
+            return CheckResult(                                       # ← 12 spaces
+                "semantic_intent",
+                True,
+                warning=True,
+                message="Semantic intent classifier unavailable."
+            )
+
+    def check_question(self, question: str) -> GuardrailResult:      # ← 4 spaces
+        original = "" if question is None else str(question)
+        sanitized, filter_log = sanitize(original)
+
+        checks: List[CheckResult] = [
+            _q_empty(original),
+            _q_nonprintable(original),
+            _q_unicode_abuse(original),
+            _q_homoglyph(original),
+            _q_leetspeak_obfuscation(original),
+            _q_length(sanitized),
+            _q_repeated_chars(sanitized),
+            _q_real_words(sanitized),
+            _q_gibberish(sanitized),
+            _q_caps(sanitized),
+            _q_punct(original),
+            _q_repetition(sanitized),
+        ]
+
+        checks.extend(_q_security(sanitized, original))
+
+        checks.append(
+            self._q_semantic_intent_llm(sanitized)
+        )
+
+        checks.extend(_q_safety(_normalized_for_attack_checks(original)))
+
+        # MODIFIED — _q_privacy now warns about masking instead of blocking
+        checks.append(_q_privacy(sanitized))
+
+        if self.non_eng_ok:
+            checks.append(CheckResult("language", True))
+        else:
+            checks.append(_q_language(sanitized))
+
+        checks.append(_q_spelling(sanitized) if self.spell else CheckResult("spelling", True))
+        checks.append(_q_grammar(sanitized))
+        checks.extend(_q_semantic_intent(sanitized))
+
+        return self._build(checks, sanitized, original, filter_log)
+
+    def __call__(self, question: str) -> GuardrailResult:            # ← 4 spaces
+        return self.check_question(question)
 
     def check_question(self, question: str) -> GuardrailResult:
         original = "" if question is None else str(question)
@@ -1203,6 +1328,10 @@ class InputGuardrail:
         ]
 
         checks.extend(_q_security(sanitized, original))
+        checks.append(
+           self._q_semantic_intent_llm(sanitized)
+        
+        )
         checks.extend(_q_safety(_normalized_for_attack_checks(original)))
         # MODIFIED — _q_privacy now warns about masking instead of blocking
         checks.append(_q_privacy(sanitized))

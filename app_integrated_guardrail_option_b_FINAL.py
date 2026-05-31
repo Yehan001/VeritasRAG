@@ -99,6 +99,12 @@ html, body, [class*="css"] { font-family: 'DM Sans', sans-serif; }
 .pii-title { color:#e3b341; font-family:'JetBrains Mono', monospace; font-size:0.78rem; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:0.4rem; }
 .pii-clean-box { background:#0d2b1a; border:1px solid #23863666; border-left:4px solid #2ea043; border-radius:8px; padding:0.7rem 1rem; color:#3fb950; margin:4px 0; font-family:'JetBrains Mono', monospace; font-size:0.82rem; }
 .pii-item { background:#2b1a00; border-left:3px solid #e3b341; padding:4px 10px; border-radius:0 4px 4px 0; color:#e3b341; font-family:'JetBrains Mono', monospace; font-size:0.8rem; margin:3px 0; }
+.url-title { font-family:'JetBrains Mono', monospace; font-size:0.78rem; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:0.4rem; }
+.url-clean-box { background:#0d2b1a; border:1px solid #23863666; border-left:4px solid #2ea043; border-radius:8px; padding:0.7rem 1rem; color:#3fb950; margin:4px 0; font-family:'JetBrains Mono', monospace; font-size:0.82rem; }
+.url-danger-box { background:#2d1117; border:1px solid #f8514966; border-left:4px solid #f85149; border-radius:8px; padding:0.7rem 1rem; color:#f85149; margin:4px 0; font-family:'JetBrains Mono', monospace; font-size:0.82rem; }
+.url-info-box { background:#0d1e36; border:1px solid #1f6feb66; border-left:4px solid #58a6ff; border-radius:8px; padding:0.7rem 1rem; color:#58a6ff; margin:4px 0; font-family:'JetBrains Mono', monospace; font-size:0.82rem; }
+.url-item { background:#0a192f; border-left:3px solid #58a6ff; padding:4px 10px; border-radius:0 4px 4px 0; color:#58a6ff; font-family:'JetBrains Mono', monospace; font-size:0.8rem; margin:3px 0; }
+.url-danger-item { background:#2b0b11; border-left:3px solid #f85149; padding:4px 10px; border-radius:0 4px 4px 0; color:#f85149; font-family:'JetBrains Mono', monospace; font-size:0.8rem; margin:3px 0; }
 </style>
 """,
     unsafe_allow_html=True,
@@ -266,6 +272,60 @@ def render_guardrail_result(q_result, original_question: str) -> None:
     else:
         st.markdown(
             '<div class="pii-clean-box">✓ No personal information (PII) detected</div>',
+            unsafe_allow_html=True,
+        )
+
+    # ── URL Sanitization & Neutralization Block ───────────────────────────────
+    url_log_items = [item for item in q_result.filter_log if "url sanitized" in item.lower()]
+
+    if url_log_items:
+        # Check if any dangerous URLs were found and neutralized
+        has_danger = any(
+            "unsafe" in item.lower() or "internal" in item.lower() or "prompt" in item.lower()
+            for item in url_log_items
+        )
+        
+        if has_danger:
+            st.markdown(
+                '<div class="url-title" style="color:#f85149;">⚠️ Dangerous URL Detected & Neutralized</div>',
+                unsafe_allow_html=True,
+            )
+            # Map each type to an icon and description
+            url_labels = {
+                "unsafe url scheme"      : ("🚨", "Unsafe URL Scheme (e.g. javascript:, file:)", "[NEUTRALIZED_DANGEROUS_URL]"),
+                "internal ip/ssrf"       : ("🔒", "Internal IP / SSRF Target (e.g. localhost, loopback)", "[NEUTRALIZED_DANGEROUS_URL]"),
+                "prompt injection attempt": ("🛑", "Prompt Injection Payload in URL Query/Params", "[NEUTRALIZED_DANGEROUS_URL]"),
+            }
+            for log_item in url_log_items:
+                after_colon = log_item.split(":", 1)[-1].strip().lower()
+                detected_types = [t.strip() for t in after_colon.split(",")]
+                for url_type in detected_types:
+                    if url_type in url_labels:
+                        icon, label, token = url_labels[url_type]
+                        st.markdown(
+                            f'<div class="url-danger-item">{icon} {label} neutralized → replaced with <b>{token}</b></div>',
+                            unsafe_allow_html=True,
+                        )
+            st.markdown(
+                '<div class="url-danger-box">🔴 Dangerous URL detected and fully neutralized to prevent retrieval poisoning, prompt injection, and SSRF.</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                '<div class="url-title" style="color:#58a6ff;">🟡 URL Detected & Sanitized</div>',
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                '<div class="url-item">🔗 Standard HTTP/HTTPS URL detected → sanitized to <b>[URL]</b></div>',
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                '<div class="url-info-box">✓ URL sanitized to a safe placeholder to prevent outbound leakage and retrieval poisoning. Embedded question can still pass safely!</div>',
+                unsafe_allow_html=True,
+            )
+    else:
+        st.markdown(
+            '<div class="url-clean-box">✓ No URLs detected inside the question</div>',
             unsafe_allow_html=True,
         )
 

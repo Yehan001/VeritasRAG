@@ -446,12 +446,95 @@ def _match(text: str, patterns: Iterable[re.Pattern]) -> Optional[str]:
             return found.group(0)
     return None
 
+def _collapse_spaced_letters(text: str) -> str:
+    """
+    Converts spaced-out words back into normal words.
+
+    Examples:
+        h a c k           -> hack
+        b o m b           -> bomb
+        h a c k system    -> hack system
+        ignore previous   -> ignore previous  (unchanged)
+
+    This helps catch:
+        h a c k
+        b y p a s s
+        i g n o r e previous instructions
+    """
+
+    words = text.split()
+
+    rebuilt = []
+    buffer = []
+
+    for token in words:
+
+        # Single alphabetic character → possible spaced word
+        if len(token) == 1 and token.isalpha():
+            buffer.append(token)
+        else:
+            if len(buffer) >= 3:
+                rebuilt.append("".join(buffer))
+            else:
+                rebuilt.extend(buffer)
+
+            buffer = []
+            rebuilt.append(token)
+
+    if buffer:
+        if len(buffer) >= 3:
+            rebuilt.append("".join(buffer))
+        else:
+            rebuilt.extend(buffer)
+
+    return " ".join(rebuilt)
 
 def _normalized_for_attack_checks(text: str) -> str:
-    # Used only for detection, not for final answer text.
-    folded = unicodedata.normalize("NFKC", text).translate(HOMOGLYPH_MAP)
-    return folded.translate(LEET_MAP)
+    """
+    Produces a detection-only version of the text.
 
+    Handles:
+        - Unicode normalization
+        - Homoglyph replacement
+        - Leetspeak normalization
+        - Spaced-letter obfuscation
+
+    Examples:
+        h4ck         -> hack
+        h a c k      -> hack
+        b y p a s s  -> bypass
+        һасk         -> hack
+    """
+
+    normalized = unicodedata.normalize("NFKC", text)
+
+    normalized = normalized.translate(HOMOGLYPH_MAP)
+
+    normalized = normalized.translate(LEET_MAP)
+
+    normalized = _collapse_spaced_letters(normalized)
+
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+
+    return normalized
+
+def _leet_risk_score(text: str) -> float:
+    """
+    Calculates how much of the input consists of common leetspeak characters.
+
+    Example:
+        h4ck        -> 0.25
+        h@ck3r      -> 0.33
+        normal text -> 0.00
+    """
+    leet_chars = set("013457@$!+8")
+
+    count = sum(
+        1 for c in text
+        if c in leet_chars
+    )
+
+    return count / max(len(text), 1)
 
 def _spell_rate(text: str) -> float:
     try:
@@ -808,32 +891,53 @@ def _q_homoglyph(original: str) -> CheckResult:
     return CheckResult("homoglyph", True)
 
 def _q_leetspeak_obfuscation(original: str) -> CheckResult:
+    """
+    Detects whether leetspeak or character obfuscation is being used
+    to hide potentially unsafe terms.
+    """
+
     normalized = _normalized_for_attack_checks(original)
-    # If normalization changes many characters and creates suspicious safety words,
-    # treat it as an obfuscation attempt rather than a spelling issue.
-    changed = sum(1 for a, b in zip(original, normalized) if a != b)
-    changed_ratio = changed / max(len(original), 1)
+
+    risk_score = _leet_risk_score(original)
+
     suspicious_terms = re.search(
-        r"\b(bomb|weapon|hack|malware|virus|kill|suicide|drugs?|terrorist|bypass)\b",
+        r"\b("
+        r"bomb|weapon|hack|hacker|hacking|"
+        r"malware|virus|trojan|ransomware|"
+        r"kill|murder|suicide|"
+        r"drug|drugs|"
+        r"terrorist|terrorism|"
+        r"bypass|exploit|phish|phishing"
+        r")\b",
         normalized,
         re.IGNORECASE,
     )
-    if changed_ratio > 0.08 and suspicious_terms:
+
+    # High-confidence obfuscation of dangerous content
+    if suspicious_terms and risk_score >= 0.10:
         return CheckResult(
             "leetspeak_obfuscation",
             False,
             True,
-            message="Question appears to obfuscate unsafe content using leetspeak/lookalike characters.",
+            message=(
+                "Question appears to obfuscate potentially unsafe content "
+                "using leetspeak or character substitutions."
+            ),
         )
-    if changed_ratio > 0.12:
+
+    # Obfuscation detected but no dangerous content
+    if risk_score >= 0.05:
         return CheckResult(
             "leetspeak_obfuscation",
             True,
             warning=True,
-            message="Question contains leetspeak or obfuscated characters. This may reduce retrieval quality.",
+            message=(
+                "Question contains leetspeak or obfuscated characters. "
+                "This may reduce retrieval quality."
+            ),
         )
-    return CheckResult("leetspeak", True)
 
+    return CheckResult("leetspeak", True)
 
 def _q_length(text: str) -> CheckResult:
     chars = len(text.strip())

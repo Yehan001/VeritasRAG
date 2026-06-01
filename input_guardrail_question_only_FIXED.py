@@ -513,7 +513,7 @@ def _contains_mixed_script_homoglyphs(text: str) -> bool:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# HTML ATTACK PREVENTION
+## HTML ATTACK PREVENTION
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _sanitize_html_attacks(text: str) -> str:
@@ -806,9 +806,6 @@ def _q_homoglyph(original: str) -> CheckResult:
             message="Question mixes Latin letters with lookalike Unicode characters, which may be a bypass attempt.",
         )
     return CheckResult("homoglyph", True)
-
-
-
 
 def _q_leetspeak_obfuscation(original: str) -> CheckResult:
     normalized = _normalized_for_attack_checks(original)

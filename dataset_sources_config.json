@@ -1,0 +1,217 @@
+{
+  "notes": [
+    "This config lists public dataset sources to merge into the classifier training dataset.",
+    "The script downloads these only when internet/HuggingFace access is available.",
+    "You must check each dataset license/card before using it in a final submission or production system.",
+    "Column names differ across datasets; the builder tries common columns and allows overrides."
+  ],
+  "huggingface_sources": [
+    {
+      "name": "neuralchemy/Prompt-injection-dataset",
+      "split": "train",
+      "target_label": "prompt_injection",
+      "text_columns": [
+        "text",
+        "prompt",
+        "input",
+        "instruction"
+      ],
+      "label_columns": [
+        "label",
+        "labels",
+        "is_prompt_injection",
+        "is_jailbreak"
+      ],
+      "enabled": true,
+      "max_rows": 20000
+    },
+    {
+      "name": "xTRam1/safe-guard-prompt-injection",
+      "split": "train",
+      "target_label": "prompt_injection",
+      "text_columns": [
+        "text",
+        "prompt",
+        "input",
+        "instruction"
+      ],
+      "label_columns": [
+        "label",
+        "labels"
+      ],
+      "enabled": true,
+      "max_rows": 20000
+    },
+    {
+      "name": "Necent/llm-jailbreak-prompt-injection-dataset",
+      "split": "train",
+      "target_label": "jailbreak",
+      "text_columns": [
+        "text",
+        "prompt",
+        "input",
+        "instruction",
+        "jailbreak_prompt"
+      ],
+      "label_columns": [
+        "label",
+        "labels",
+        "category",
+        "type"
+      ],
+      "enabled": true,
+      "max_rows": 30000
+    },
+    {
+      "name": "centrepourlasecuriteia/jailbreak-dataset",
+      "split": "train",
+      "target_label": "jailbreak",
+      "text_columns": [
+        "text",
+        "prompt",
+        "input",
+        "jailbreak_prompt",
+        "transformed_prompt"
+      ],
+      "label_columns": [
+        "label",
+        "labels",
+        "category",
+        "type"
+      ],
+      "enabled": true,
+      "max_rows": 15000
+    },
+    {
+      "name": "justinphan3110/harmful_harmless_instructions",
+      "split": "train",
+      "target_label": "dangerous_content",
+      "text_columns": [
+        "text",
+        "prompt",
+        "instruction",
+        "input"
+      ],
+      "label_columns": [
+        "label",
+        "labels",
+        "is_safe",
+        "safe"
+      ],
+      "enabled": true,
+      "max_rows": 30000
+    },
+    {
+      "name": "LLM-LAT/harmful-dataset",
+      "split": "train",
+      "target_label": "dangerous_content",
+      "text_columns": [
+        "text",
+        "prompt",
+        "instruction",
+        "input"
+      ],
+      "label_columns": [
+        "label",
+        "labels",
+        "category"
+      ],
+      "enabled": true,
+      "max_rows": 30000
+    },
+    {
+      "name": "google/jigsaw_toxicity_pred",
+      "split": "train",
+      "target_label": "hate_abuse",
+      "text_columns": [
+        "comment_text",
+        "text",
+        "comment"
+      ],
+      "label_columns": [
+        "toxic",
+        "severe_toxic",
+        "obscene",
+        "threat",
+        "insult",
+        "identity_hate",
+        "label"
+      ],
+      "enabled": true,
+      "max_rows": 30000
+    },
+    {
+      "name": "OxAISH-AL-LLM/wiki_toxic",
+      "split": "train",
+      "target_label": "hate_abuse",
+      "text_columns": [
+        "comment",
+        "comment_text",
+        "text"
+      ],
+      "label_columns": [
+        "label",
+        "toxic"
+      ],
+      "enabled": true,
+      "max_rows": 30000
+    },
+    {
+      "name": "textdetox/multilingual_toxicity_dataset",
+      "split": "train",
+      "target_label": "hate_abuse",
+      "text_columns": [
+        "text",
+        "toxic_sentence",
+        "sentence"
+      ],
+      "label_columns": [
+        "label",
+        "toxic",
+        "is_toxic"
+      ],
+      "enabled": true,
+      "max_rows": 50000
+    },
+    {
+      "name": "SalKhan12/prompt-safety-dataset",
+      "split": "train",
+      "target_label": "dangerous_content",
+      "text_columns": [
+        "text",
+        "prompt",
+        "input",
+        "instruction"
+      ],
+      "label_columns": [
+        "label",
+        "labels",
+        "safe",
+        "is_safe"
+      ],
+      "enabled": true,
+      "max_rows": 30000
+    }
+  ],
+  "local_csv_folder": "data/public_raw",
+  "local_csv_required_columns": [
+    "text",
+    "label"
+  ],
+  "label_set": [
+    "safe",
+    "prompt_injection",
+    "jailbreak",
+    "cyber_abuse",
+    "self_harm",
+    "violence_threat",
+    "dangerous_content",
+    "hate_abuse",
+    "extremism",
+    "child_safety",
+    "privacy_pii",
+    "format_issue",
+    "script_or_command_injection",
+    "out_of_scope"
+  ]
+}

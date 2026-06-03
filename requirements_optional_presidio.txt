@@ -1,0 +1,5 @@
+presidio-analyzer
+presidio-anonymizer
+spacy
+# Optional language model:
+# python -m spacy download en_core_web_lg

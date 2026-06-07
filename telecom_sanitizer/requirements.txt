@@ -1,0 +1,22 @@
+# # Telecom Input Sanitizer — Requirements
+# presidio-analyzer>=2.2
+# presidio-anonymizer>=2.2
+# streamlit>=1.30
+# phonenumbers>=8.12
+# spacy>=3.7
+# Core sanitization
+presidio-analyzer>=2.2
+presidio-anonymizer>=2.2
+phonenumbers>=8.12
+
+# LLM layers
+anthropic>=0.50
+groq>=1.0
+
+# UI
+streamlit>=1.35
+pandas>=2.0
+
+# NLP (optional — improves NER-based PII detection)
+# spacy>=3.7
+# Run after install: python -m spacy download en_core_web_sm

@@ -26,6 +26,9 @@ Version : 2.0.0
 import os
 import re
 import json
+import time
+import html
+
 from dataclasses import dataclass
 
 import numpy as np
@@ -49,6 +52,28 @@ DEFAULT_TOP_K         = 5
 SIMILARITY_THRESHOLD  = 0.60   # cosine score >= this → grounded immediately
 BORDERLINE_LOW        = 0.40   # cosine score <  this → out of context immediately
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SECURITY CONFIG
+# ═══════════════════════════════════════════════════════════════════════════════
+
+MAX_INPUT_LENGTH = 5000
+
+RATE_LIMIT_WINDOW = 60
+MAX_REQUESTS_PER_WINDOW = 20
+
+TEMP_BLOCK_TIME = 300
+
+REQUEST_LOG = {}
+BLOCKED_USERS = {}
+
+BLOCKED_PATTERNS = [
+    r"ignore previous instructions",
+    r"reveal.*system prompt",
+    r"show.*system prompt",
+    r"<script.*?>",
+    r"javascript:",
+]
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PHRASES THE LLM USES TO SELF-REPORT MISSING INFORMATION
@@ -194,6 +219,89 @@ RULES:
 
 Answer:"""
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# SECURITY HELPERS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _sanitize_input(text: str) -> str:
+
+    if not isinstance(text, str):
+        raise ValueError("Input must be a string.")
+
+    # Remove dangerous script/style tags
+    text = re.sub(
+        r"</?(script|style).*?>",
+        "",
+        text,
+        flags=re.IGNORECASE
+    )
+
+    # Remove javascript URLs
+    text = re.sub(
+        r"javascript:",
+        "",
+        text,
+        flags=re.IGNORECASE
+    )
+
+    # Normalize whitespace
+    text = re.sub(r"\s+", " ", text)
+
+    text = text.strip()
+
+    # Escape remaining HTML special chars
+    text = html.escape(text)
+
+    if len(text) > MAX_INPUT_LENGTH:
+        raise ValueError(
+            f"Input exceeds {MAX_INPUT_LENGTH} characters."
+        )
+
+    lower = text.lower()
+
+    for pattern in BLOCKED_PATTERNS:
+
+        if re.search(pattern, lower):
+            raise ValueError(
+                "Unsafe input detected."
+            )
+
+    return text
+
+
+def _check_rate_limit(user_id: str):
+
+    now = time.time()
+
+    if user_id in BLOCKED_USERS:
+
+        if now < BLOCKED_USERS[user_id]:
+
+            raise ValueError(
+                "User temporarily blocked due to abuse."
+            )
+
+        del BLOCKED_USERS[user_id]
+
+    if user_id not in REQUEST_LOG:
+        REQUEST_LOG[user_id] = []
+
+    REQUEST_LOG[user_id] = [
+        t for t in REQUEST_LOG[user_id]
+        if now - t < RATE_LIMIT_WINDOW
+    ]
+
+    REQUEST_LOG[user_id].append(now)
+
+    if len(REQUEST_LOG[user_id]) > MAX_REQUESTS_PER_WINDOW:
+
+        BLOCKED_USERS[user_id] = now + TEMP_BLOCK_TIME
+
+        raise ValueError(
+            "Rate limit exceeded. Try again later."
+        )
+
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # INTERNAL HELPERS
@@ -287,6 +395,7 @@ def check_faithfulness(
     source_text:   str,
     api_key:       str = "",
     question:      str = "",
+    user_id: str = "anonymous",
     model:         str = DEFAULT_MODEL,
     chunk_size:    int = DEFAULT_CHUNK_SIZE,
     chunk_overlap: int = DEFAULT_CHUNK_OVERLAP,
@@ -377,6 +486,17 @@ def check_faithfulness(
             )
     """
 
+    
+    # ── Security checks ──────────────────────────────────────────────────────────
+    _check_rate_limit(user_id)
+
+    answer = _sanitize_input(answer)
+
+    source_text = _sanitize_input(source_text)
+
+    if question:
+        question = _sanitize_input(question)
+
     # ── Validate inputs ───────────────────────────────────────────────────────
     key = api_key or os.getenv("GROQ_API_KEY", "")
     if not key:
@@ -451,6 +571,9 @@ def check_faithfulness(
         final_answer = answer        # nothing was removed — return as-is
     else:
         final_answer = _rebuild(groq_client, model, effective_question, grounded)
+
+    # Output Sanitization
+    final_answer = html.escape(final_answer)    
 
     # ── Return structured result ──────────────────────────────────────────────
     return FaithfulnessResult(

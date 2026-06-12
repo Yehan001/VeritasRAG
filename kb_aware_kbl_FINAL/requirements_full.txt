@@ -1,0 +1,6 @@
+-r requirements_light.txt
+transformers>=4.40.0
+torch>=2.1.0
+sentence-transformers>=2.6.0
+presidio-analyzer>=2.2.354
+presidio-anonymizer>=2.2.354

@@ -1,0 +1,9 @@
+Cybersecurity Knowledge Base
+
+Ethical hacking is the authorized practice of testing systems to identify weaknesses before attackers exploit them. Penetration testing should only be performed with written permission and a clearly defined scope.
+
+SQL injection is a web application vulnerability where untrusted input is incorrectly included in a database query. Defensive controls include parameterized queries, input validation, least-privilege database accounts, logging, and web application firewalls.
+
+Phishing awareness training helps users identify suspicious login pages, fake account warnings, and social engineering attempts. Employees should report suspicious messages instead of clicking unknown links.
+
+Malware defense includes endpoint protection, patching, least privilege, network segmentation, backups, and incident response planning. This document is for defensive education only and does not provide attack payloads, credential theft methods, or unauthorized exploitation steps.

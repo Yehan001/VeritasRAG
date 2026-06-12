@@ -1,7 +1,0 @@
-Solar Energy Knowledge Base
-
-Solar energy is renewable energy produced from sunlight. Photovoltaic panels convert sunlight into electricity using semiconductor materials.
-
-Solar power systems usually include panels, inverters, wiring, mounting structures, batteries, and charge controllers. Benefits include reduced fossil fuel use, lower electricity bills, and cleaner energy generation.
-
-Limitations include weather dependency, night-time unavailability, installation cost, and the need for suitable roof or land area.

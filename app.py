@@ -60,7 +60,7 @@ def maybe_train_sklearn():
         return True, "Existing sklearn classifier loaded."
     return False, (
         "Local sklearn classifier is not trained yet. Run: "
-        "python train_sklearn_classifier.py --data data/guardrail_training_template.csv "
+        "python train_sklearn_classifier.py --data data/guardrail_training_merged_public.csv "
         "--output models/sklearn_safety_classifier.joblib"
     )
 
@@ -105,10 +105,55 @@ with st.sidebar:
         ["Local sklearn classifier (train first)", "Groq semantic classifier", "Local HuggingFace classifier", "None"],
         index=0,
     )
-    block_threshold = st.slider("Classifier block threshold", 0.20, 0.95, 0.45, 0.05)
-    warn_threshold = st.slider("Critical-label warning threshold", 0.10, 0.90, 0.25, 0.05)
+    block_threshold = st.slider("Classifier block threshold (unsafe labels)", 0.20, 0.95, 0.45, 0.05)
+    warn_threshold = st.slider("General warn threshold", 0.10, 0.90, 0.25, 0.05)
 
     st.caption("Use Local sklearn classifier (train first) for free local semantic filtering.")
+
+    # ------------------------------------------------------------------ #
+    # Per-label critical thresholds                                        #
+    # Based on OpenAI safety taxonomy + LlamaFirewall PromptGuard 2:      #
+    # narrow high-stakes labels block at low confidence;                   #
+    # broad catch-all labels need higher confidence to avoid false pos.    #
+    # ------------------------------------------------------------------ #
+    st.divider()
+    st.subheader("Per-Label Critical Thresholds")
+    st.caption(
+        "Narrow high-stakes labels (self_harm, violence_threat, child_safety, extremism) "
+        "block at LOW confidence — any prediction is a meaningful signal. "
+        "Broad labels (dangerous_content) need HIGHER confidence to avoid false positives."
+    )
+
+    thresh_self_harm = st.slider(
+        "self_harm block threshold", 0.10, 0.90,
+        GuardrailConfig.critical_label_thresholds["self_harm"], 0.05,
+        help="Narrow + high stakes. Keep low."
+    )
+    thresh_violence = st.slider(
+        "violence_threat block threshold", 0.10, 0.90,
+        GuardrailConfig.critical_label_thresholds["violence_threat"], 0.05,
+        help="Narrow + high stakes. Keep low."
+    )
+    thresh_child = st.slider(
+        "child_safety block threshold", 0.10, 0.90,
+        GuardrailConfig.critical_label_thresholds["child_safety"], 0.05,
+        help="Narrow + high stakes. Keep low."
+    )
+    thresh_extremism = st.slider(
+        "extremism block threshold", 0.10, 0.90,
+        GuardrailConfig.critical_label_thresholds["extremism"], 0.05,
+        help="Narrow + high stakes. Keep low."
+    )
+    thresh_cyber = st.slider(
+        "cyber_abuse block threshold", 0.10, 0.90,
+        GuardrailConfig.critical_label_thresholds["cyber_abuse"], 0.05,
+        help="Fairly specific label — medium threshold is reasonable."
+    )
+    thresh_dangerous = st.slider(
+        "dangerous_content block threshold", 0.10, 0.95,
+        GuardrailConfig.critical_label_thresholds["dangerous_content"], 0.05,
+        help="Broad catch-all label. Keep HIGH to avoid false positives."
+    )
 
     if st.button("Retrain sklearn classifier"):
         try:
@@ -134,6 +179,16 @@ def build_guardrail():
     config.use_classifier = enable_classifier and classifier_mode != "None"
     config.classifier_block_threshold = block_threshold
     config.classifier_warn_threshold = warn_threshold
+
+    # Apply per-label thresholds from sidebar sliders
+    config.critical_label_thresholds = {
+        "self_harm":         thresh_self_harm,
+        "violence_threat":   thresh_violence,
+        "child_safety":      thresh_child,
+        "extremism":         thresh_extremism,
+        "cyber_abuse":       thresh_cyber,
+        "dangerous_content": thresh_dangerous,
+    }
 
     classifier = None
     if config.use_classifier:

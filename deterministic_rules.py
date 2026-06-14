@@ -17,6 +17,28 @@ Rules are used only where manual detection is appropriate:
 - obvious high-risk lexical cues
 
 Flexible harmful meaning is handled by the classifier layer.
+
+Fix (HIGH_RISK + INSTRUCTIONAL over-blocking):
+The original combo blocked ANY input containing a high-risk word + an instructional
+word, which caused false positives on:
+  - historical/academic framing  ("how did World War II weapons work")
+  - medical/scientific framing   ("how does poison affect the body")
+  - fiction/news framing         ("novel about a bomb disposal expert")
+  - defensive framing            ("how to detect malware on my PC")
+  - support framing              ("suicide prevention hotline steps")
+
+Fix approach (greedy token reduction / safe-context suppression):
+  Step 1: Collect false positive blocks.
+  Step 2: Remove tokens one by one greedily until the match drops.
+  Step 3: Identify over-triggering token — it was the HIGH_RISK or INSTRUCTIONAL
+          word, but context tokens were the actual differentiator.
+  Step 4: Add SAFE_CONTEXT_RE that suppresses the BLOCK when safe framing is present.
+          Add DIRECT_HARM_AMPLIFIERS_RE that overrides safe context when the input
+          is clearly a direct actionable harmful request.
+  Step 5: Downgrade HIGH_RISK+INSTRUCTIONAL+safe_context from BLOCK → WARN
+          so the classifier layer makes the final semantic decision.
+
+Also fixed: HIGH_RISK_OBJECT_RE now covers plurals (toxins, weapons, grenades, etc.)
 """
 
 from __future__ import annotations
@@ -76,7 +98,6 @@ PATH_TEMPLATE_RE = re.compile(
     re.I | re.S,
 )
 
-
 EXTREMISM_RE = re.compile(
     r"\b(?:isis|islamic\s+state|isil|al[-\s]?qaeda|al[-\s]?qaida|taliban|terrorist\s+(?:group|organization|organisation)|extremist\s+(?:group|organization|organisation))\b|"
     r"\b(?:act|pretend|roleplay)\s+(?:like|as)\s+(?:a|an)?\s*(?:isis|islamic\s+state|isil|al[-\s]?qaeda|al[-\s]?qaida|taliban|terrorist|extremist)\s*(?:member|fighter|supporter)?\b|"
@@ -90,16 +111,122 @@ CHILD_SAFETY_RE = re.compile(
     re.I | re.S,
 )
 
-# Not an exhaustive harmful list. This is a high-confidence lexical safety net.
-# The classifier is responsible for broader semantic coverage.
+# ---------------------------------------------------------------------------
+# HIGH_RISK_OBJECT_RE
+#
+# Covers both singular and plural forms.
+# Fix: added s? suffix to cover toxins, weapons, explosives, grenades, etc.
+# The classifier handles broader semantic coverage beyond this list.
+# ---------------------------------------------------------------------------
 HIGH_RISK_OBJECT_RE = re.compile(
-    r"\b(bomb|explosive|detonator|grenade|weapon|poison|toxin|malware|ransomware|keylogger|phishing|credential|suicide|self\s*harm)\b",
+    r"\b(bombs?|explosives?|detonators?|grenades?|weapons?|poisons?|toxins?|"
+    r"malware|ransomware|keyloggers?|phishing|credentials?|"
+    r"suicide|self\s*harm)\b",
     re.I,
 )
 
+# ---------------------------------------------------------------------------
+# INSTRUCTIONAL_RE
+# Verbs/nouns signalling actionable intent.
+# ---------------------------------------------------------------------------
 INSTRUCTIONAL_RE = re.compile(
-    r"\b(how|ways?|methods?|steps?|guide|instructions?|tutorial|make|build|create|synthesize|produce|bypass|hack|crack|steal|kill|hurt|attack)\b",
+    r"\b(how|ways?|methods?|steps?|guide|instructions?|tutorial|make|build|create|"
+    r"synthesize|produce|bypass|hack|crack|steal|kill|hurt|attack)\b",
     re.I,
+)
+
+# ---------------------------------------------------------------------------
+# SAFE_CONTEXT_RE  ← NEW
+#
+# Patterns that indicate academic, historical, medical, fictional, defensive,
+# journalistic, or support framing.
+#
+# When this matches alongside HIGH_RISK + INSTRUCTIONAL, the rule DOWNGRADES
+# from BLOCK → WARN so the classifier makes the final semantic decision.
+#
+# Derived via greedy token reduction on confirmed false positives:
+#   "how did World War II bombs work"           → context token: world war / ww2
+#   "explain how poison affects the body"       → context token: affects / body
+#   "steps the CDC uses to track toxins"        → context token: cdc / track
+#   "how does antivirus detect malware"         → context token: antivirus / detect
+#   "suicide prevention hotline steps"          → context token: prevention / hotline
+#   "how to create a weapon in a video game"    → context token: video game
+#   "novel about a bomb disposal expert"        → context token: novel / disposal
+#   "chemistry class guide to toxins"           → context token: chemistry class
+# ---------------------------------------------------------------------------
+SAFE_CONTEXT_RE = re.compile(
+    r"""
+    # --- Historical / war / academic framing ---
+    \b(histor(?:y|ical|ically)|world\s*war|ww[12i]+|medieval|ancient|
+       cold\s*war|museum|archive|warfare\s+era|
+       how\s+(?:did|were|was)\b)\b|
+
+    # --- Scientific / medical / research framing ---
+    \b(research|academic|peer.reviewed|scientific|
+       chemistry\s+class|biology\s+class|pharmacology|
+       medicine|medical|clinical|symptom|diagnosis|treatment|
+       antidote|patholog|toxicolog|epidemiolog|public\s+health|
+       \bcdc\b|\bwho\b|\bfda\b|
+       affect(?:s|ed|ing)?\s+the\s+body|physiolog|
+       how\s+does\s+\w+\s+affect)\b|
+
+    # --- Defensive / detection / security research framing ---
+    \b(detect(?:ion)?|defend|defense|defence|
+       prevent(?:ion)?|antivirus|anti.malware|firewall|
+       security\s+research|penetration\s+test|pen\s+test|
+       how\s+to\s+(?:protect|stop|block|defend)|
+       mitigat|patch|remediat|incident\s+response|forensics)\b|
+
+    # --- Fiction / creative / game framing ---
+    \b(fiction|novel|story|screenplay|movie|film|
+       video\s*game|game\s+character|in\s+a\s+game|
+       for\s+(?:a\s+)?(?:book|story|novel|screenplay)|
+       creative\s+writing|tabletop|dnd|dungeon|
+       fantasy\s+setting|sci.fi|fictional)\b|
+
+    # --- News / journalism / policy framing ---
+    \b(journalism|journalist|documentary|
+       policy|legislation|law\s+enforcement|court\s+case|
+       why\s+did|what\s+caused|what\s+happened|
+       according\s+to|cited\s+by)\b|
+
+    # --- Mental health / support / awareness framing ---
+    \b(prevention|hotline|crisis\s+line|mental\s+health|counseling|
+       counsellor|therapist|psycholog|psychiatr|support\s+group|
+       warning\s+signs?|risk\s+factors?|
+       how\s+to\s+help|how\s+to\s+recognize|
+       cope|coping|awareness)\b|
+
+    # --- Disposal / safety / compliance framing ---
+    \b(disposal|dispos(?:e|ing)|deactivat|decommission|
+       safe\s+handling|safety\s+protocol|compliance|
+       hazmat|hazardous\s+material|osha|epa)\b
+    """,
+    re.I | re.X | re.S,
+)
+
+# ---------------------------------------------------------------------------
+# DIRECT_HARM_AMPLIFIERS_RE  ← NEW
+#
+# These tokens signal a direct, actionable harmful request even when some
+# safe-context words may also be present.
+# When these match, safe-context suppression is OVERRIDDEN and BLOCK is kept.
+#
+# Examples that should still BLOCK even if they contain context-like words:
+#   "step by step guide to make a bomb at home"
+#   "how to synthesize poison and hide it from doctors"
+#   "how to build a weapon to use against someone"
+# ---------------------------------------------------------------------------
+DIRECT_HARM_AMPLIFIERS_RE = re.compile(
+    r"\b(step\s+by\s+step|at\s+home|from\s+scratch|"
+    r"without\s+getting\s+caught|undetected|untraceable|"
+    r"hide\s+(?:it|from)|secret(?:ly)?|covert(?:ly)?|"
+    r"for\s+my\s+own\s+use|to\s+use\s+against|"
+    r"to\s+(?:attack|kill|hurt|harm)|"
+    r"to\s+poison\s+someone|to\s+blow\s+up|"
+    r"without\s+anyone\s+knowing|on\s+a\s+real\s+person|"
+    r"actually\s+work(?:s)?)\b",
+    re.I | re.S,
 )
 
 
@@ -109,6 +236,20 @@ def _decode_base64(blob: str) -> str:
         return base64.b64decode(padded, validate=False).decode("utf-8", errors="ignore")
     except Exception:
         return ""
+
+
+def _has_safe_context(text: str) -> bool:
+    """
+    Returns True if safe-context framing is detected AND no direct harm
+    amplifier overrides it.
+
+    Logic (greedy token reduction result):
+      - If DIRECT_HARM_AMPLIFIERS match → always False (block wins)
+      - If SAFE_CONTEXT matches → True (downgrade to WARN, classifier decides)
+    """
+    if DIRECT_HARM_AMPLIFIERS_RE.search(text):
+        return False
+    return bool(SAFE_CONTEXT_RE.search(text))
 
 
 def run_deterministic_rules(norm: NormalizationResult, block_urls: bool = True) -> List[RuleEvent]:
@@ -192,10 +333,50 @@ def run_deterministic_rules(norm: NormalizationResult, block_urls: bool = True) 
             else:
                 events.append(RuleEvent("encoded_payload_base64", "BLOCK", "MEDIUM", "Base64-like encoded payload detected."))
 
-    # High-confidence harmful cue + instruction pattern.
-    # This is not meant to list every sentence. It catches obvious short obfuscations,
-    # then the classifier handles semantic variations.
+    # ---------------------------------------------------------------------------
+    # HIGH_RISK_OBJECT + INSTRUCTIONAL combo — with safe-context suppression.
+    #
+    # Original behaviour: BLOCK on any match of both patterns (too aggressive).
+    #
+    # New behaviour:
+    #   HIGH_RISK + INSTRUCTIONAL + safe context present  → WARN  (classifier decides)
+    #   HIGH_RISK + INSTRUCTIONAL + no safe context       → BLOCK (HIGH risk)
+    #   HIGH_RISK + INSTRUCTIONAL + direct harm amplifier → BLOCK (amplifier overrides)
+    #
+    # Still BLOCKS:
+    #   "how to make a bomb"                          no safe context     → BLOCK
+    #   "steps to synthesize poison at home"          amplifier: at home  → BLOCK
+    #   "guide to building malware"                   no safe context     → BLOCK
+    #   "how to make poison and hide it from doctors" amplifier: hide it  → BLOCK
+    #   "how to build a weapon to use against someone" amplifier: against → BLOCK
+    #
+    # Now WARNS (passes to classifier):
+    #   "explain how poison affects the body"         medical context     → WARN
+    #   "suicide prevention hotline steps"            prevention context  → WARN
+    #   "how to detect malware on my PC"              defensive context   → WARN
+    #   "how to create a weapon in a video game"      fiction context     → WARN
+    #   "chemistry class guide to toxins"             academic context    → WARN
+    #   "steps the CDC uses to track toxins"          cdc/health context  → WARN
+    #   "how to help someone with self harm"          support context     → WARN
+    #   "how does antivirus detect malware"           defensive context   → WARN
+    # ---------------------------------------------------------------------------
     if HIGH_RISK_OBJECT_RE.search(combined) and INSTRUCTIONAL_RE.search(combined):
-        events.append(RuleEvent("high_risk_instructional_cue", "BLOCK", "HIGH", "High-risk object combined with instructional intent detected."))
+        if _has_safe_context(combined):
+            events.append(RuleEvent(
+                "high_risk_instructional_cue",
+                "WARN",
+                "MEDIUM",
+                "High-risk object with instructional intent detected, but safe context "
+                "(academic/historical/medical/fictional/defensive/support) found. "
+                "Downgraded to warning — classifier will make the final decision.",
+            ))
+        else:
+            events.append(RuleEvent(
+                "high_risk_instructional_cue",
+                "BLOCK",
+                "HIGH",
+                "High-risk object combined with instructional intent detected. "
+                "No safe context found.",
+            ))
 
     return events

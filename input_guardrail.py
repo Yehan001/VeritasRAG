@@ -15,6 +15,13 @@ Design:
 
 This does NOT generate answers.
 This does NOT depend on a document or domain.
+
+Threshold design (based on OpenAI safety taxonomy + LlamaFirewall PromptGuard 2 approach):
+- Narrow, high-stakes labels (child_safety, self_harm, violence_threat, extremism) use LOW thresholds
+  because a low-confidence prediction is still meaningful signal for these categories.
+- Broad/catch-all labels (dangerous_content) use HIGHER thresholds to avoid false positives,
+  since moderate confidence on a broad label is less reliable signal.
+- cyber_abuse sits in the middle — specific enough to be meaningful at medium confidence.
 """
 
 from __future__ import annotations
@@ -88,14 +95,24 @@ class GuardrailConfig:
     classifier_block_threshold = 0.45
     classifier_warn_threshold = 0.25
 
-    # If classifier is uncertain but predicts an unsafe label, block these critical labels.
-    critical_labels = {
-        "self_harm",
-        "violence_threat",
-        "dangerous_content",
-        "cyber_abuse",
-        "child_safety",
-        "extremism",
+    # Per-label thresholds for the classifier block decision.
+    #
+    # Rationale (OpenAI safety taxonomy + LlamaFirewall PromptGuard 2):
+    #   - Narrow, high-stakes labels use LOW thresholds:
+    #     even a low-confidence prediction is meaningful signal.
+    #   - Broad/catch-all labels (dangerous_content) use HIGHER thresholds:
+    #     moderate confidence on a broad label is unreliable and causes false positives.
+    #   - cyber_abuse is specific enough to sit at medium confidence.
+    #
+    # These are warn thresholds: if the classifier predicts this label AND
+    # confidence >= this value, the input is blocked (not just warned).
+    critical_label_thresholds: Dict[str, float] = {
+        "self_harm":         0.25,  # narrow + high stakes → block early
+        "violence_threat":   0.25,  # narrow + high stakes → block early
+        "child_safety":      0.25,  # narrow + high stakes → block early
+        "extremism":         0.25,  # narrow + high stakes → block early
+        "cyber_abuse":       0.35,  # medium — fairly specific label
+        "dangerous_content": 0.55,  # broad catch-all → require higher confidence
     }
 
 
@@ -191,6 +208,17 @@ class InputGuardrail:
             action_taken="Safe input may continue to the next application layer.",
         )
 
+    def _get_critical_threshold(self, label: str) -> Optional[float]:
+        """
+        Return the per-label block threshold for critical labels,
+        or None if the label is not in the critical set.
+
+        Based on the OpenAI safety taxonomy subcategorization approach:
+        broad labels require higher confidence before acting;
+        narrow high-stakes labels act at lower confidence.
+        """
+        return self.config.critical_label_thresholds.get(label, None)
+
     def check(self, user_input: str) -> GuardrailResult:
         events: List[FilterEvent] = []
 
@@ -242,9 +270,25 @@ class InputGuardrail:
                 classifier_label = label
                 classifier_confidence = confidence
 
-                if (not safe and confidence >= self.config.classifier_block_threshold) or (
-                    label in self.config.critical_labels and confidence >= self.config.classifier_warn_threshold
-                ):
+                # Per-label threshold check (replaces flat critical_labels set).
+                # Broad labels like dangerous_content need higher confidence (0.55)
+                # before blocking; narrow high-stakes labels (child_safety, self_harm)
+                # block at low confidence (0.25). This follows the OpenAI taxonomy
+                # subcategorization approach and LlamaFirewall PromptGuard 2 precision focus.
+                critical_threshold = self._get_critical_threshold(label)
+
+                if not safe and confidence >= self.config.classifier_block_threshold:
+                    # Standard block: classifier is confident and label is unsafe
+                    events.append(FilterEvent(
+                        name=f"classifier_{label}",
+                        layer=f"Layer 2: semantic_classifier/{model_name}",
+                        action="BLOCK",
+                        risk="HIGH",
+                        message=reason,
+                    ))
+                elif critical_threshold is not None and confidence >= critical_threshold:
+                    # Per-label critical threshold block:
+                    # label is in critical set AND meets its specific threshold
                     events.append(FilterEvent(
                         name=f"classifier_{label}",
                         layer=f"Layer 2: semantic_classifier/{model_name}",

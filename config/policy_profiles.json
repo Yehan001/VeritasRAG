@@ -1,0 +1,62 @@
+{
+  "version": "1.0",
+  "description": "Configurable policy profiles inspired by programmable guardrails and safety taxonomies. Edit this file to add new domains or change warning/block behaviour without rewriting core code.",
+  "global_block_labels": [
+    "prompt_injection",
+    "jailbreak",
+    "script_or_command_injection",
+    "cyber_abuse",
+    "dangerous_content",
+    "self_harm",
+    "violence",
+    "hate_abuse",
+    "extremism",
+    "child_safety",
+    "fraud_scam",
+    "sexual_content"
+  ],
+  "global_warn_labels": [
+    "privacy_pii",
+    "misinformation",
+    "copyright_violation",
+    "format_issue"
+  ],
+  "roles": {
+    "public_user": {"dual_use_allowed": false},
+    "student": {"dual_use_allowed": false},
+    "employee": {"dual_use_allowed": false},
+    "security_trainee": {"dual_use_allowed": true},
+    "security_admin": {"dual_use_allowed": true},
+    "internal_red_team": {"dual_use_allowed": true}
+  },
+  "domains": {
+    "cybersecurity": {
+      "risk_level": "high",
+      "allowed_intents": ["safe", "educational", "defensive", "awareness"],
+      "warn_intents": ["privacy_pii", "misinformation", "copyright_violation", "format_issue"],
+      "blocked_intents": ["prompt_injection", "jailbreak", "cyber_abuse", "dangerous_content", "self_harm", "violence", "hate_abuse", "extremism", "child_safety", "fraud_scam", "sexual_content", "script_or_command_injection"],
+      "require_grounding_for_strict_mode": true
+    },
+    "medical": {
+      "risk_level": "high",
+      "allowed_intents": ["safe", "educational", "awareness"],
+      "warn_intents": ["privacy_pii", "misinformation"],
+      "blocked_intents": ["self_harm", "dangerous_content", "violence", "child_safety", "sexual_content"],
+      "require_grounding_for_strict_mode": true
+    },
+    "finance": {
+      "risk_level": "high",
+      "allowed_intents": ["safe", "educational", "policy_explanation"],
+      "warn_intents": ["privacy_pii", "misinformation", "copyright_violation"],
+      "blocked_intents": ["fraud_scam", "cyber_abuse", "script_or_command_injection"],
+      "require_grounding_for_strict_mode": true
+    },
+    "general": {
+      "risk_level": "low",
+      "allowed_intents": ["safe", "educational"],
+      "warn_intents": ["privacy_pii", "misinformation", "copyright_violation", "format_issue"],
+      "blocked_intents": ["prompt_injection", "jailbreak", "cyber_abuse", "dangerous_content", "self_harm", "violence", "hate_abuse", "extremism", "child_safety", "fraud_scam", "sexual_content", "script_or_command_injection"],
+      "require_grounding_for_strict_mode": false
+    }
+  }
+}

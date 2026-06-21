@@ -1,0 +1,47 @@
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Local downloaded HF models (large, regenerate via download_models.py)
+models/
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Audit logs / runtime data (contains test input previews, don't commit)
+guardrail_audit_log.jsonl
+*.jsonl
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Environment / secrets
+.env
+.env.*
+
+# Test cache
+.pytest_cache/
+.coverage
+htmlcov/

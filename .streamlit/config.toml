@@ -1,0 +1,13 @@
+[server]
+headless = true
+enableCORS = false
+port = 8501
+filewatchertype ='poll'
+
+[theme]
+base = "light"
+primaryColor = "#d6de38"
+backgroundColor = "#000000"
+secondaryBackgroundColor = "#c17244"
+textColor = "#ffffff"
+font = "sans serif"

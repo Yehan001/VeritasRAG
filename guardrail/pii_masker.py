@@ -7,14 +7,13 @@ from .schema import PIIResult
 
 
 @lru_cache(maxsize=1)
-def _get_presidio_engines():
-    """Build Presidio's AnalyzerEngine/AnonymizerEngine ONCE per process.
+def _get_presidio_analyzer():
+    """Build Presidio's AnalyzerEngine ONCE per process.
     AnalyzerEngine() loads a spaCy NLP model from disk internally — that is
-    the multi-second cost previously paid on every single mask_pii() call.
+    the multi-second cost previously paid on every single call.
     """
     from presidio_analyzer import AnalyzerEngine
-    from presidio_anonymizer import AnonymizerEngine
-    return AnalyzerEngine(), AnonymizerEngine()
+    return AnalyzerEngine()
 
 
 REGEX_PATTERNS: List[Tuple[str, re.Pattern]] = [
@@ -27,30 +26,32 @@ REGEX_PATTERNS: List[Tuple[str, re.Pattern]] = [
 ]
 
 
-def mask_pii(text: str, use_presidio: bool = True) -> PIIResult:
+def detect_pii(text: str, use_presidio: bool = True) -> PIIResult:
+    """Detect PII in text and return what was found.
+    Does NOT mask or modify the text — original text is always passed through.
+    """
     original = text or ""
     start = time.perf_counter()
 
     if use_presidio:
         try:
-            analyzer, anonymizer = _get_presidio_engines()
+            analyzer = _get_presidio_analyzer()
             results = analyzer.analyze(text=original, language="en")
             if results:
-                anonymized = anonymizer.anonymize(text=original, analyzer_results=results)
                 entities = sorted({r.entity_type for r in results})
                 latency = time.perf_counter() - start
-                print(f"[mask_pii] backend=presidio latency={latency:.4f} seconds")
-                return PIIResult(masked_text=anonymized.text, found=True, entities=entities)
+                print(f"[detect_pii] backend=presidio found={entities} latency={latency:.4f} seconds")
+                # masked_text returns original unchanged — detection only
+                return PIIResult(masked_text=original, found=True, entities=entities)
         except Exception:
             pass
 
-    masked = original
+    # Regex fallback — detect only, no substitution
     found_entities = []
     for entity, pattern in REGEX_PATTERNS:
-        if pattern.search(masked):
+        if pattern.search(original):
             found_entities.append(entity)
-            masked = pattern.sub(f"[{entity}]", masked)
 
     latency = time.perf_counter() - start
-    print(f"[mask_pii] backend=regex_fallback latency={latency:.4f} seconds")
-    return PIIResult(masked_text=masked, found=bool(found_entities), entities=found_entities)
+    print(f"[detect_pii] backend=regex_fallback found={found_entities} latency={latency:.4f} seconds")
+    return PIIResult(masked_text=original, found=bool(found_entities), entities=found_entities)

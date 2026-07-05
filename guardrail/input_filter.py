@@ -6,22 +6,18 @@ from .audit_logger import append_audit_log
 from .hf_safety import HFModelConfig, HFSafetyEngine
 from .kb_profiler import profile_kb
 from .kb_relevance import KBRelevanceChecker
-from .pii_masker import mask_pii
+from .pii_masker import detect_pii
 from .policy_engine import apply_policy
-from .schema import FilterResult, KBProfile,PIIResult, RelevanceResult, SafetyResult
+from .schema import FilterResult, KBProfile, PIIResult, RelevanceResult, SafetyResult
 from .text_utils import normalize_text, sanitize_for_display
 
 
 @dataclass
 class GuardrailSettings:
     strict_mode: bool = False
-    # KB-authoritative mode means: if a high-risk question is strongly grounded
-    # in the uploaded KB, allow it with a warning instead of blocking.
-    # Prompt-injection and technical attacks are still always blocked.
     kb_authoritative_mode: bool = True
     enable_hf_models: bool = True
     use_presidio: bool = True
-    kb_backend: str = "tfidf"  # tfidf or sentence_transformers
     relevance_threshold: float = 0.08
     grounding_threshold: float = 0.12
     user_role: str = "public_user"
@@ -45,11 +41,10 @@ class KBAwareInputFilter:
         print(f"[KBAwareInputFilter.__init__] profile_kb latency={profile_latency:.4f} seconds")
 
         self.relevance_checker = KBRelevanceChecker(
-            backend=self.settings.kb_backend,
             relevance_threshold=self.settings.relevance_threshold,
             grounding_threshold=self.settings.grounding_threshold,
         )
-        self.relevance_checker.fit(self.kb_text)  # already prints its own latency
+        self.relevance_checker.fit(self.kb_text)
 
         hf_config = HFModelConfig(
             prompt_injection_model=self.settings.prompt_injection_model,
@@ -81,30 +76,27 @@ class KBAwareInputFilter:
         if sanitize_events:
             events.append({"stage": "sanitization", "events": sanitize_events})
 
-        # PII masking disabled for now — pass text through unchanged.
-        # (Re-enable by calling mask_pii(sanitized, use_presidio=...) again.)
-        pii = PIIResult(masked_text=sanitized, found=False, entities=[])
+        # PII detection only — detects and flags PII, original text passed through unchanged
+        pii = detect_pii(sanitized, use_presidio=self.settings.use_presidio)
+        if pii.found:
+            events.append({"stage": "pii_detection", "entities": pii.entities})
 
-        #pii = mask_pii(sanitized, use_presidio=self.settings.use_presidio)  # already prints its own latency
-        #if pii.found:
-        #    events.append({"stage": "pii_masking", "entities": pii.entities})
-
-        # Safety must check the RAW original input before display sanitization.
-        # Otherwise attacks like <script>alert(1)</script> can be cleaned first and incorrectly treated as safe.
-        safety = self.safety_engine.check(original)  # already prints its own latency
+        # Safety checks raw original input before sanitization
+        safety = self.safety_engine.check(original)
         if pii.found and safety.decision == "allow":
             safety = SafetyResult(
                 label="privacy_pii",
                 decision="warn",
                 risk_level="medium",
                 confidence=0.90,
-                backend="pii_masking",
-                reasons=[f"PII detected and masked: {', '.join(pii.entities)}"],
+                backend="pii_detection",
+                reasons=[f"PII detected: {', '.join(pii.entities)}"],
                 raw={},
             )
         events.append({"stage": "safety", "label": safety.label, "decision": safety.decision, "backend": safety.backend})
 
-        relevance = self.relevance_checker.check(pii.masked_text)  # already prints its own latency
+        # KB relevance runs on sanitized text
+        relevance = self.relevance_checker.check(sanitized)
         events.append({"stage": "kb_relevance", "score": relevance.score, "method": relevance.method})
 
         role = user_role or self.settings.user_role
@@ -130,10 +122,10 @@ class KBAwareInputFilter:
             reason=reason,
             original_input=original,
             sanitized_input=sanitized,
-            pii_masked_input=pii.masked_text,
             kb_profile=self.kb_profile,
             relevance=relevance,
             safety=safety,
+            pii=pii,
             user_role=role,
             events=events,
         )

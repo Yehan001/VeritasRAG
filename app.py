@@ -16,12 +16,6 @@ os.environ["HF_HUB_OFFLINE"] = "1"
 from guardrail.document_loader import load_document
 from guardrail.input_filter import GuardrailSettings, KBAwareInputFilter
 
-# ---------------------------------------------------------------------------
-# Resolve the local models/ directory.
-# app.py sits at <project_root>/app.py, so:
-#   _APP_DIR  → <project_root>/
-#   _MODELS   → <project_root>/models/
-# ---------------------------------------------------------------------------
 _APP_DIR = Path(__file__).resolve().parent
 _MODELS = _APP_DIR / "models"
 
@@ -31,9 +25,6 @@ def _local(folder_name: str) -> str:
     return str(_MODELS / folder_name)
 
 
-# ---------------------------------------------------------------------------
-# Streamlit page config
-# ---------------------------------------------------------------------------
 st.set_page_config(page_title="KB-Aware Open-Source Guardrail", layout="wide")
 st.title("Research-Based KB-Aware Open-Source Input Guardrail")
 st.caption(
@@ -67,9 +58,6 @@ with st.sidebar:
         help="Stores local JSONL test evidence without full private content.",
     )
     use_presidio = st.toggle("Use Presidio PII if installed", value=True)
-    kb_backend = st.selectbox(
-        "KB relevance backend", ["tfidf", "sentence_transformers"], index=0
-    )
     user_role = st.selectbox(
         "User role",
         ["public_user", "student", "employee", "security_trainee", "security_admin", "internal_red_team"],
@@ -79,27 +67,20 @@ with st.sidebar:
     grounding_threshold = st.slider("Grounding threshold", 0.01, 0.90, 0.12, 0.01)
 
     st.subheader("HF models (local paths)")
-
-    # ------------------------------------------------------------------
-    # Model dropdowns — first entry is always the locally downloaded path.
-    # The HF hub IDs are kept as fallback labels so the UI is self-documenting,
-    # but with TRANSFORMERS_OFFLINE=1 they will fail if selected without a
-    # matching local download.
-    # ------------------------------------------------------------------
     prompt_options = [
-        _local("protectai__deberta-v3-small-prompt-injection-v2"),   # ← local (default)
-        "protectai/deberta-v3-small-prompt-injection-v2",             # HF hub ID (offline: fails)
-        "meta-llama/Llama-Prompt-Guard-2-86M",                        # HF hub ID (offline: fails)
+        _local("protectai__deberta-v3-small-prompt-injection-v2"),
+        "protectai/deberta-v3-small-prompt-injection-v2",
+        "meta-llama/Llama-Prompt-Guard-2-86M",
     ]
     moderation_options = [
-        _local("oxyapi__albert-moderation-001"),                      # ← local (default)
-        "oxyapi/albert-moderation-001",                               # HF hub ID (offline: fails)
-        "KoalaAI/Text-Moderation",                                    # HF hub ID (offline: fails)
-        "unitary/toxic-bert",                                         # HF hub ID (offline: fails)
+        _local("oxyapi__albert-moderation-001"),
+        "oxyapi/albert-moderation-001",
+        "KoalaAI/Text-Moderation",
+        "unitary/toxic-bert",
     ]
     zero_options = [
-        _local("cross-encoder__nli-MiniLM2-L6-H768"),                # ← local (default)
-        "cross-encoder/nli-MiniLM2-L6-H768",                         # HF hub ID (offline: fails)
+        _local("cross-encoder__nli-MiniLM2-L6-H768"),
+        "cross-encoder/nli-MiniLM2-L6-H768",
     ]
 
     prompt_model = st.selectbox("Prompt injection model", prompt_options, index=0)
@@ -135,7 +116,6 @@ settings = GuardrailSettings(
     kb_authoritative_mode=kb_authoritative_mode,
     enable_hf_models=enable_hf,
     use_presidio=use_presidio,
-    kb_backend=kb_backend,
     relevance_threshold=relevance_threshold,
     grounding_threshold=grounding_threshold,
     user_role=user_role,
@@ -159,7 +139,7 @@ if not kb_text.strip():
     st.warning("Please upload or paste a knowledge base first.")
     st.stop()
 
-with st.spinner("Building KB profile and relevance index..."):
+with st.spinner("Building KB profile and relevance index (sentence transformers)..."):
     guardrail = build_filter(kb_text, settings_key)
 
 # ---------------------------------------------------------------------------
@@ -198,8 +178,14 @@ if st.button("Run guardrail", type="primary"):
     c3.metric("KB relevance", result.relevance.score)
     c4.metric("KB method", result.relevance.method)
 
-    st.markdown("#### Sanitized / masked input")
-    st.code(result.pii_masked_input or result.sanitized_input)
+    st.markdown("#### Sanitized input")
+    st.code(result.sanitized_input)
+
+    with st.expander("PII detection"):
+        if result.pii.found:
+            st.warning(f"PII detected: {', '.join(result.pii.entities)}")
+        else:
+            st.success("No PII detected.")
 
     with st.expander("Top retrieved KB chunks"):
         if result.relevance.top_chunks:
@@ -220,8 +206,8 @@ if st.button("Run guardrail", type="primary"):
 # ---------------------------------------------------------------------------
 st.markdown("### Research-based method used")
 st.info(
-    "Pipeline: input rails → PII masking → prompt attack model → "
-    "moderation/zero-shot safety model → KB relevance/grounding → "
+    "Pipeline: input rails → PII detection → prompt attack model → "
+    "moderation/zero-shot safety model → KB relevance/grounding (sentence transformers) → "
     "KB-authoritative policy decision engine. In KB-authoritative mode, "
     "harmful/actionable content can pass with warning only when grounded in "
     "the uploaded KB. Prompt-injection and technical attacks remain blocked."

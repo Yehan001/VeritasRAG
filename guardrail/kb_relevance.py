@@ -6,10 +6,6 @@ from typing import List, Optional
 
 import numpy as np
 
-# ---------------------------------------------------------------------------
-# Block ALL outbound Hugging Face / datasets network calls at the library level.
-# These must be set before any sentence_transformers / huggingface_hub import.
-# ---------------------------------------------------------------------------
 os.environ["TRANSFORMERS_OFFLINE"] = "1"
 os.environ["HF_DATASETS_OFFLINE"] = "1"
 os.environ["HF_HUB_OFFLINE"] = "1"
@@ -17,20 +13,6 @@ os.environ["HF_HUB_OFFLINE"] = "1"
 from .schema import RelevanceResult
 from .text_utils import normalize_text
 
-# ---------------------------------------------------------------------------
-# Resolve the local models/ directory.
-# Expected layout:
-#
-#   <project_root>/
-#       guardrail/
-#           kb_relevance.py       ← this file
-#       models/
-#           sentence-transformers__all-MiniLM-L6-v2/
-#
-# __file__ → .../guardrail/kb_relevance.py
-# parent   → .../guardrail/
-# parent^2 → .../  (project root)
-# ---------------------------------------------------------------------------
 _PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
 _PROJECT_ROOT = os.path.dirname(_PACKAGE_DIR)
 _ST_LOCAL_PATH = os.path.join(
@@ -53,15 +35,11 @@ def chunk_text(text: str, max_words: int = 120, overlap: int = 25) -> List[str]:
 
 @dataclass
 class KBRelevanceChecker:
-    backend: str = "tfidf"          # "tfidf" or "sentence_transformers"
     relevance_threshold: float = 0.08
     grounding_threshold: float = 0.12
-    # Points to the locally downloaded model folder — never contacts HF hub.
     st_model_name: str = _ST_LOCAL_PATH
     chunks: List[str] = field(default_factory=list)
-    method_used: str = "tfidf"
-    _vectorizer: Optional[object] = None
-    _matrix: Optional[object] = None
+    method_used: str = "sentence_transformers"
     _st_model: Optional[object] = None
     _st_embeddings: Optional[object] = None
 
@@ -71,48 +49,29 @@ class KBRelevanceChecker:
         if not self.chunks:
             self.chunks = [""]
 
-        if self.backend == "sentence_transformers":
-            try:
-                from sentence_transformers import SentenceTransformer
-
-                start_load = time.perf_counter()
-                # local_files_only=True → raises immediately if folder missing,
-                # no network attempt is made.
-                self._st_model = SentenceTransformer(
-                    self.st_model_name,
-                    local_files_only=True,   # ← OFFLINE: never attempt download
-                )
-                load_latency = time.perf_counter() - start_load
-                print(f"[KBRelevanceChecker.fit] model_load={self.st_model_name} latency={load_latency:.4f} seconds")
-
-                start_encode = time.perf_counter()
-                self._st_embeddings = self._st_model.encode(
-                    self.chunks, normalize_embeddings=True
-                )
-                encode_latency = time.perf_counter() - start_encode
-                print(f"[KBRelevanceChecker.fit] chunk_encode chunks={len(self.chunks)} latency={encode_latency:.4f} seconds")
-
-                self.method_used = "sentence_transformers"
-                total_latency = time.perf_counter() - start_total
-                print(f"[KBRelevanceChecker.fit] backend={self.method_used} total_latency={total_latency:.4f} seconds")
-                return
-            except Exception as exc:
-                # Model folder missing or corrupt — fall through to TF-IDF.
-                print(f"[KBRelevanceChecker.fit] sentence_transformers failed ({exc}), falling back to tfidf")
-                self.method_used = "tfidf_fallback"
-
         try:
-            start_fit = time.perf_counter()
-            from sklearn.feature_extraction.text import TfidfVectorizer
-            self._vectorizer = TfidfVectorizer(ngram_range=(1, 2), min_df=1, stop_words="english")
-            self._matrix = self._vectorizer.fit_transform(
-                [normalize_text(c) for c in self.chunks]
+            from sentence_transformers import SentenceTransformer
+
+            start_load = time.perf_counter()
+            self._st_model = SentenceTransformer(
+                self.st_model_name,
+                local_files_only=True,
             )
-            self.method_used = "tfidf"
-            fit_latency = time.perf_counter() - start_fit
-            print(f"[KBRelevanceChecker.fit] tfidf_fit_transform latency={fit_latency:.4f} seconds")
+            load_latency = time.perf_counter() - start_load
+            print(f"[KBRelevanceChecker.fit] model_load={self.st_model_name} latency={load_latency:.4f} seconds")
+
+            start_encode = time.perf_counter()
+            self._st_embeddings = self._st_model.encode(
+                self.chunks, normalize_embeddings=True
+            )
+            encode_latency = time.perf_counter() - start_encode
+            print(f"[KBRelevanceChecker.fit] chunk_encode chunks={len(self.chunks)} latency={encode_latency:.4f} seconds")
+
+            self.method_used = "sentence_transformers"
+
         except Exception as exc:
-            print(f"[KBRelevanceChecker.fit] tfidf failed ({exc}), using keyword_overlap")
+            # ST model folder missing or corrupt — fall back to keyword overlap only
+            print(f"[KBRelevanceChecker.fit] sentence_transformers failed ({exc}), falling back to keyword_overlap")
             self.method_used = "keyword_overlap"
 
         total_latency = time.perf_counter() - start_total
@@ -136,17 +95,7 @@ class KBRelevanceChecker:
             print(f"[KBRelevanceChecker.check] backend=sentence_transformers score_latency={latency:.4f} total_latency={total_latency:.4f} seconds")
             return result
 
-        if self.method_used.startswith("tfidf") and self._vectorizer is not None and self._matrix is not None:
-            start_score = time.perf_counter()
-            q_vec = self._vectorizer.transform([q])
-            scores = (self._matrix @ q_vec.T).toarray().ravel()
-            result = self._make_result(scores, top_k)
-            latency = time.perf_counter() - start_score
-            total_latency = time.perf_counter() - start_total
-            print(f"[KBRelevanceChecker.check] backend={self.method_used} score_latency={latency:.4f} total_latency={total_latency:.4f} seconds")
-            return result
-
-        # Last-resort lexical overlap fallback
+        # Last-resort keyword overlap fallback
         start_score = time.perf_counter()
         q_terms = set(re.findall(r"[a-zA-Z]{3,}", q.lower()))
         scores = []

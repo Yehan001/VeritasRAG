@@ -6,8 +6,8 @@ filewatchertype ='poll'
 
 [theme]
 base = "light"
-primaryColor = "#d6de38"
+primaryColor = "#c73b3b"
 backgroundColor = "#000000"
-secondaryBackgroundColor = "#c17244"
+secondaryBackgroundColor = "#5f5b53"
 textColor = "#ffffff"
 font = "sans serif"

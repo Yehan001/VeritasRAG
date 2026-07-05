@@ -18,6 +18,7 @@ MODELS = {
     "protectai/deberta-v3-small-prompt-injection-v2": "protectai__deberta-v3-small-prompt-injection-v2",
     "oxyapi/albert-moderation-001": "oxyapi__albert-moderation-001",
     "cross-encoder/nli-MiniLM2-L6-H768": "cross-encoder__nli-MiniLM2-L6-H768",
+    "sentence-transformers/all-MiniLM-L6-v2": "sentence-transformers__all-MiniLM-L6-v2",
 }
 
 # Only pull files we actually need - skips duplicate weight formats

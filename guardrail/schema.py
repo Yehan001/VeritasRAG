@@ -58,6 +58,7 @@ class APIResponse:
     pii_found: bool
     pii_entities: List[str] = field(default_factory=list)
     user_role: str = "public_user"
+    tenant_id: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -77,6 +78,7 @@ class FilterResult:
     pii: PIIResult
     user_role: str
     events: List[Dict[str, Any]] = field(default_factory=list)
+    tenant_id: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -99,4 +101,5 @@ class FilterResult:
             pii_found=self.pii.found,
             pii_entities=self.pii.entities,
             user_role=self.user_role,
+            tenant_id=self.tenant_id,
         )

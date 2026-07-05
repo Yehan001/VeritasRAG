@@ -35,8 +35,8 @@ def chunk_text(text: str, max_words: int = 120, overlap: int = 25) -> List[str]:
 
 @dataclass
 class KBRelevanceChecker:
-    relevance_threshold: float = 0.08
-    grounding_threshold: float = 0.12
+    relevance_threshold: float = 0.25
+    grounding_threshold: float = 0.35
     st_model_name: str = _ST_LOCAL_PATH
     chunks: List[str] = field(default_factory=list)
     method_used: str = "sentence_transformers"

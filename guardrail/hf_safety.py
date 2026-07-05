@@ -328,3 +328,16 @@ class HFSafetyEngine:
         if "danger" in label or "illegal" in label:
             return "dangerous_content"
         return "unsafe_content"
+
+
+# ---------------------------------------------------------------------------
+# Shared, process-wide engine for API usage.
+#
+# In the Streamlit app, one KBAwareInputFilter (and its own HFSafetyEngine)
+# is created per session, which is fine for a single-user demo. In the API,
+# many tenants share one running process, so the 3 HF models must be loaded
+# and warmed up exactly ONCE for the whole process, not once per tenant KB.
+# api.py imports this instance, warms it up in its startup event, and injects
+# it into every KBAwareInputFilter it creates (see input_filter.py).
+# ---------------------------------------------------------------------------
+_SHARED_SAFETY_ENGINE = HFSafetyEngine(enable_hf=True)

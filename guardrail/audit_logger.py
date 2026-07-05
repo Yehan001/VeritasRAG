@@ -15,6 +15,7 @@ def append_audit_log(result_dict: Dict[str, Any], path: Optional[str] = "guardra
     p = Path(path)
     safe = {
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        "tenant_id": result_dict.get("tenant_id"),
         "decision": result_dict.get("decision"),
         "passed": result_dict.get("passed"),
         "risk_level": result_dict.get("risk_level"),

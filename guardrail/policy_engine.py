@@ -1,6 +1,7 @@
 from typing import List, Tuple
 
 from .schema import KBProfile, RelevanceResult, SafetyResult
+from .text_utils import simple_tokenize
 
 ALLOWED_ROLES = {
     "public_user",
@@ -41,10 +42,62 @@ DENIAL_OR_SAFETY_DISCLAIMER_PATTERNS = [
     "do not attempt",
 ]
 
+# Common short/stop words excluded from lexical overlap so matches like "the",
+# "how", "what" don't count as evidence the KB actually discusses the question.
+_STOPWORDS = {
+    "the", "a", "an", "is", "are", "was", "were", "to", "of", "for", "in",
+    "on", "at", "and", "or", "how", "what", "why", "who", "with", "this",
+    "that", "it", "do", "does", "did", "can", "could", "would", "should",
+    "will", "you", "your", "i", "me", "my", "someone", "people", "person",
+    "using", "used", "use", "described", "document", "documents",
+}
+
+# Generic infrastructure/domain nouns that show up throughout almost any
+# cybersecurity (or similarly broad technical) KB regardless of what specific
+# topic is being asked about. Overlapping on words like "system" or "network"
+# alone is not meaningful evidence the KB actually discusses the question --
+# only overlap on more specific, topic-identifying words counts.
+_GENERIC_DOMAIN_NOISE = {
+    "system", "systems", "network", "networks", "security", "data",
+    "firewall", "firewalls", "access", "information", "technology",
+    "organization", "organizations", "employee", "employees",
+}
+
+# Minimum number of shared, non-stopword, non-generic tokens (length >= 4)
+# required between the question and the KB's top-matched chunks before a
+# grounding score is trusted for the KB-authoritative override below.
+MIN_LEXICAL_OVERLAP_TOKENS = 3
+
 
 def _kb_has_denial_or_safety_disclaimer(relevance: RelevanceResult) -> bool:
     text = " ".join(relevance.top_chunks).lower()
     return any(pattern in text for pattern in DENIAL_OR_SAFETY_DISCLAIMER_PATTERNS)
+
+
+def _lexical_overlap_ok(question: str, relevance: RelevanceResult) -> bool:
+    """True only if the question and the KB's matched chunks actually share
+    real words. This guards against embedding models returning a moderate
+    cosine similarity for two semantically unrelated sentences (a known
+    property of sentence embeddings), which would otherwise let an unrelated
+    harmful question slip through the KB-authoritative override just because
+    it scored above the grounding threshold by embedding-space noise.
+    """
+    if not relevance.top_chunks:
+        return False
+    q_tokens = {
+        t for t in simple_tokenize(question)
+        if len(t) >= 4 and t not in _STOPWORDS and t not in _GENERIC_DOMAIN_NOISE
+    }
+    if not q_tokens:
+        return False
+    kb_tokens = {
+        t
+        for chunk in relevance.top_chunks
+        for t in simple_tokenize(chunk)
+        if len(t) >= 4 and t not in _STOPWORDS and t not in _GENERIC_DOMAIN_NOISE
+    }
+    shared = q_tokens & kb_tokens
+    return len(shared) >= MIN_LEXICAL_OVERLAP_TOKENS
 
 
 def apply_policy(
@@ -54,14 +107,17 @@ def apply_policy(
     strict_mode: bool,
     user_role: str,
     kb_authoritative_mode: bool = True,
+    question_text: str = "",
 ) -> Tuple[str, bool, str, str, List[str]]:
     """Return decision, passed, risk, reason, events.
 
     Main policy modes:
     - Normal safety: unsafe/actionable requests are blocked.
     - KB-authoritative mode: unsafe/actionable requests can pass WITH WARNING
-      only when they are strongly grounded in the uploaded KB and the KB does
-      not contain a refusal/disclaimer phrase for that content.
+      only when they are strongly grounded in the uploaded KB (both by
+      embedding similarity AND by actually sharing real words with the
+      matched KB text) and the KB does not contain a refusal/disclaimer
+      phrase for that content.
 
     Prompt injection and technical attacks are always blocked because they target
     the application/guardrail rather than asking about KB content.
@@ -84,7 +140,9 @@ def apply_policy(
 
         # KB-authoritative override: if the KB actually supports the high-risk
         # content, pass it with a visible warning instead of blocking.
-        if kb_authoritative_mode and relevance.is_grounded:
+        # Requires BOTH a passing embedding-grounding score AND real lexical
+        # overlap, so a noisy embedding score alone can never trigger this.
+        if kb_authoritative_mode and relevance.is_grounded and _lexical_overlap_ok(question_text, relevance):
             extra_event = "kb_authoritative_high_risk_override"
             extra_reason = ""
             if _kb_has_denial_or_safety_disclaimer(relevance):

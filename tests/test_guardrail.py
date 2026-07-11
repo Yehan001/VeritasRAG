@@ -5,12 +5,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from guardrail.input_filter import GuardrailSettings, KBAwareInputFilter
+from guardrail.input_filter import GuardrailSettings, SafetyInputFilter
 
 
 def build_filter():
     settings = GuardrailSettings(enable_hf_models=False, strict_mode=False)
-    return KBAwareInputFilter("", settings)
+    return SafetyInputFilter("", settings)
 
 
 def assert_decision(question, expected):

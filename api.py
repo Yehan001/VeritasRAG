@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 from guardrail.audit_logger import append_audit_log
 from guardrail.hf_safety import _SHARED_SAFETY_ENGINE
-from guardrail.input_filter import GuardrailSettings, KBAwareInputFilter
+from guardrail.input_filter import GuardrailSettings, SafetyInputFilter
 
 app = FastAPI(title="Safety-Only Guardrail API")
 
@@ -41,7 +41,7 @@ def check(req: CheckRequest):
         enable_hf_models=req.enable_hf_models,
     )
 
-    guardrail = KBAwareInputFilter("", settings=settings, safety_engine=_SHARED_SAFETY_ENGINE)
+    guardrail = SafetyInputFilter("", settings=settings, safety_engine=_SHARED_SAFETY_ENGINE)
     result = guardrail.check(req.question, user_role=req.user_role)
 
     append_audit_log(result.to_dict(), path="guardrail_audit_log.jsonl")

@@ -333,11 +333,11 @@ class HFSafetyEngine:
 # ---------------------------------------------------------------------------
 # Shared, process-wide engine for API usage.
 #
-# In the Streamlit app, one KBAwareInputFilter (and its own HFSafetyEngine)
-# is created per session, which is fine for a single-user demo. In the API,
-# many tenants share one running process, so the 3 HF models must be loaded
-# and warmed up exactly ONCE for the whole process, not once per tenant KB.
+# In the Streamlit app, one guardrail instance and its own safety engine are
+# created per session, which is fine for a single-user demo. In the API,
+# many requests share one running process, so the HF models must be loaded and
+# warmed up exactly once for the whole process rather than repeatedly.
 # api.py imports this instance, warms it up in its startup event, and injects
-# it into every KBAwareInputFilter it creates (see input_filter.py).
+# it into each guardrail instance it creates (see input_filter.py).
 # ---------------------------------------------------------------------------
 _SHARED_SAFETY_ENGINE = HFSafetyEngine(enable_hf=True)

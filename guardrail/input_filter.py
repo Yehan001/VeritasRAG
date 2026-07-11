@@ -6,7 +6,7 @@ from .audit_logger import append_audit_log
 from .hf_safety import HFModelConfig, HFSafetyEngine
 from .pii_masker import detect_pii
 from .policy_engine import apply_policy
-from .schema import FilterResult, KBProfile, PIIResult, RelevanceResult, SafetyResult
+from .schema import ContextProfile, FilterResult, PIIResult, SafetyResult, SupportResult
 from .text_utils import normalize_text, sanitize_for_display
 
 
@@ -26,24 +26,26 @@ class GuardrailSettings:
     audit_log_path: str = "guardrail_audit_log.jsonl"
 
 
-class KBAwareInputFilter:
+class SafetyInputFilter:
     def __init__(
         self,
-        kb_text: str,
+        context_text: str,
         settings: Optional[GuardrailSettings] = None,
         safety_engine: Optional[HFSafetyEngine] = None,
-        kb_profile: Optional[KBProfile] = None,
+        kb_profile: Optional[ContextProfile] = None,
         relevance_checker: Optional[Any] = None,
     ) -> None:
         start_init = time.perf_counter()
 
         self.settings = settings or GuardrailSettings()
-        self.kb_text = kb_text or ""
+        self.context_text = context_text or ""
+        self.kb_text = self.context_text
 
         if kb_profile is not None:
-            self.kb_profile = kb_profile
+            self.context_profile = kb_profile
         else:
-            self.kb_profile = KBProfile(domain="general", confidence=0.0, risk_level="low", matched_terms=[])
+            self.context_profile = ContextProfile(domain="general", confidence=0.0, risk_level="low", matched_terms=[])
+        self.kb_profile = self.context_profile
 
         self.relevance_checker = relevance_checker
 
@@ -61,7 +63,7 @@ class KBAwareInputFilter:
             self.safety_engine.warmup()
 
         init_latency = time.perf_counter() - start_init
-        print(f"[KBAwareInputFilter.__init__] total_setup_latency={init_latency:.4f} seconds")
+        print(f"[SafetyInputFilter.__init__] total_setup_latency={init_latency:.4f} seconds")
 
     def check(
         self,
@@ -77,13 +79,13 @@ class KBAwareInputFilter:
         start = time.perf_counter()
         normalized = normalize_text(original)
         latency = time.perf_counter() - start
-        print(f"[KBAwareInputFilter.check] normalize_text latency={latency:.4f} seconds")
+        print(f"[SafetyInputFilter.check] normalize_text latency={latency:.4f} seconds")
         events.append({"stage": "normalization", "output_preview": normalized[:180]})
 
         start = time.perf_counter()
         sanitized, sanitize_events = sanitize_for_display(original)
         latency = time.perf_counter() - start
-        print(f"[KBAwareInputFilter.check] sanitize_for_display latency={latency:.4f} seconds")
+        print(f"[SafetyInputFilter.check] sanitize_for_display latency={latency:.4f} seconds")
         if sanitize_events:
             events.append({"stage": "sanitization", "events": sanitize_events})
 
@@ -107,23 +109,23 @@ class KBAwareInputFilter:
         events.append({"stage": "safety", "label": safety.label, "decision": safety.decision, "backend": safety.backend})
 
         # Relevance against a KB is no longer used in the decision path.
-        relevance = RelevanceResult(False, False, 0.0, [], "disabled")
-        events.append({"stage": "kb_relevance", "score": relevance.score, "method": relevance.method})
+        relevance = SupportResult(False, False, 0.0, [], "disabled")
+        events.append({"stage": "support_signal", "score": relevance.score, "method": relevance.method})
 
         role = user_role or self.settings.user_role
 
         start = time.perf_counter()
         decision, passed, risk, reason, policy_events = apply_policy(
             safety=safety,
-            relevance=relevance,
-            kb_profile=self.kb_profile,
+            support=relevance,
+            context_profile=self.context_profile,
             strict_mode=False,
             user_role=role,
-            kb_authoritative_mode=False,
+            context_override_enabled=False,
             question_text=sanitized,
         )
         latency = time.perf_counter() - start
-        print(f"[KBAwareInputFilter.check] apply_policy latency={latency:.4f} seconds")
+        print(f"[SafetyInputFilter.check] apply_policy latency={latency:.4f} seconds")
         if policy_events:
             events.append({"stage": "policy", "events": policy_events})
 
@@ -134,8 +136,8 @@ class KBAwareInputFilter:
             reason=reason,
             original_input=original,
             sanitized_input=sanitized,
-            kb_profile=self.kb_profile,
-            relevance=relevance,
+            context_profile=self.context_profile,
+            support=relevance,
             safety=safety,
             pii=pii,
             user_role=role,
@@ -147,9 +149,12 @@ class KBAwareInputFilter:
             start = time.perf_counter()
             append_audit_log(result.to_dict(), self.settings.audit_log_path)
             latency = time.perf_counter() - start
-            print(f"[KBAwareInputFilter.check] append_audit_log latency={latency:.4f} seconds")
+            print(f"[SafetyInputFilter.check] append_audit_log latency={latency:.4f} seconds")
 
         total_latency = time.perf_counter() - start_total
-        print(f"[KBAwareInputFilter.check] TOTAL_FULL_PIPELINE_LATENCY={total_latency:.4f} seconds")
+        print(f"[SafetyInputFilter.check] TOTAL_FULL_PIPELINE_LATENCY={total_latency:.4f} seconds")
 
         return result
+
+
+KBAwareInputFilter = SafetyInputFilter

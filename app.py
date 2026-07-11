@@ -6,7 +6,7 @@ os.environ["TRANSFORMERS_OFFLINE"] = "1"
 os.environ["HF_DATASETS_OFFLINE"] = "1"
 os.environ["HF_HUB_OFFLINE"] = "1"
 
-from guardrail.input_filter import GuardrailSettings, KBAwareInputFilter
+from guardrail.input_filter import GuardrailSettings, SafetyInputFilter
 
 st.set_page_config(page_title="Safety-Only Guardrail", layout="wide")
 st.title("Safety-Only Input Guardrail")
@@ -37,7 +37,7 @@ settings = GuardrailSettings(
 
 @st.cache_resource(show_spinner=False)
 def build_filter():
-    return KBAwareInputFilter("", settings)
+    return SafetyInputFilter("", settings)
 
 
 guardrail = build_filter()

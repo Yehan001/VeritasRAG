@@ -1,7 +1,7 @@
-from guardrail.input_filter import GuardrailSettings, KBAwareInputFilter
+from guardrail.input_filter import GuardrailSettings, SafetyInputFilter
 
 settings = GuardrailSettings(enable_hf_models=False, strict_mode=False)
-filter_ = KBAwareInputFilter("", settings)
+filter_ = SafetyInputFilter("", settings)
 
 examples = [
     "What is ethical hacking?",
@@ -19,5 +19,5 @@ for q in examples:
     print("Q:", q)
     print("Decision:", r.decision)
     print("Safety:", r.safety.label, r.safety.backend)
-    print("Relevance:", r.relevance.score, r.relevance.method)
+    print("Support signal:", r.relevance.score, r.relevance.method)
     print("Reason:", r.reason)

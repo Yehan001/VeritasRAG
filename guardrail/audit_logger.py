@@ -22,8 +22,6 @@ def append_audit_log(result_dict: Dict[str, Any], path: Optional[str] = "guardra
         "reason": result_dict.get("reason"),
         "input_preview": (result_dict.get("original_input") or "")[:160],
         "pii_masked_preview": (result_dict.get("pii_masked_input") or "")[:160],
-        "kb_domain": (result_dict.get("kb_profile") or {}).get("domain"),
-        "kb_relevance_score": (result_dict.get("relevance") or {}).get("score"),
         "safety_label": (result_dict.get("safety") or {}).get("label"),
         "safety_backend": (result_dict.get("safety") or {}).get("backend"),
         "user_role": result_dict.get("user_role"),

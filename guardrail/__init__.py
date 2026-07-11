@@ -1,3 +1,3 @@
-from .input_filter import KBAwareInputFilter, GuardrailSettings
+from .input_filter import GuardrailSettings, KBAwareInputFilter, SafetyInputFilter
 
-__all__ = ["KBAwareInputFilter", "GuardrailSettings"]
+__all__ = ["GuardrailSettings", "SafetyInputFilter", "KBAwareInputFilter"]

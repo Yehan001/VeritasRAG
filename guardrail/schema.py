@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Optional
 
 
 @dataclass
-class KBProfile:
+class ContextProfile:
     domain: str
     confidence: float
     risk_level: str
@@ -11,12 +11,16 @@ class KBProfile:
 
 
 @dataclass
-class RelevanceResult:
+class SupportResult:
     is_relevant: bool
     is_grounded: bool
     score: float
     top_chunks: List[str] = field(default_factory=list)
     method: str = "sentence_transformers"
+
+
+KBProfile = ContextProfile
+RelevanceResult = SupportResult
 
 
 @dataclass
@@ -41,7 +45,7 @@ class PIIResult:
 @dataclass
 class APIResponse:
     """Clean response model returned to calling apps via the API.
-    Excludes internal debug fields, raw input text, and KB chunk content.
+    Excludes internal debug fields, raw input text, and source content details.
     """
     decision: str
     passed: bool
@@ -72,13 +76,21 @@ class FilterResult:
     reason: str
     original_input: str
     sanitized_input: str
-    kb_profile: KBProfile
-    relevance: RelevanceResult
+    context_profile: ContextProfile
+    support: SupportResult
     safety: SafetyResult
     pii: PIIResult
     user_role: str
     events: List[Dict[str, Any]] = field(default_factory=list)
     tenant_id: Optional[str] = None
+
+    @property
+    def kb_profile(self) -> ContextProfile:
+        return self.context_profile
+
+    @property
+    def relevance(self) -> SupportResult:
+        return self.support
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -93,11 +105,11 @@ class FilterResult:
             safety_label=self.safety.label,
             safety_backend=self.safety.backend,
             safety_confidence=self.safety.confidence,
-            relevance_score=self.relevance.score,
-            relevance_is_relevant=self.relevance.is_relevant,
-            relevance_is_grounded=self.relevance.is_grounded,
-            kb_domain=self.kb_profile.domain,
-            kb_risk_level=self.kb_profile.risk_level,
+            relevance_score=self.support.score,
+            relevance_is_relevant=self.support.is_relevant,
+            relevance_is_grounded=self.support.is_grounded,
+            kb_domain=self.context_profile.domain,
+            kb_risk_level=self.context_profile.risk_level,
             pii_found=self.pii.found,
             pii_entities=self.pii.entities,
             user_role=self.user_role,

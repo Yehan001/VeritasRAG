@@ -73,13 +73,19 @@ def _compile_fuzzy_dict(pattern_dict: Dict[str, List[str]]) -> Dict[str, List[Tu
 
 PROMPT_INJECTION_PATTERNS = [
     r"ignore (all )?(previous|prior|above) instructions",
+    r"follow (my )?instructions (from now on|from now onwards|from here on)",
     r"reveal (the )?(system|developer) prompt",
+    r"show (me )?(the )?(system|developer) prompt",
     r"show (me )?(the )?(system|developer) instructions",
+    r"give me (the )?(system|developer) prompt",
+    r"tell me (the )?(system|developer) prompt",
     r"act as dan\b",
     r"developer mode",
     r"jailbreak",
     r"bypass (your|the) (rules|safety|restrictions)",
     r"you are now unrestricted",
+    r"override (your|the) (rules|safety|restrictions)",
+    r"forget (the )?(previous|prior|above) instructions",
 ]
 
 TECH_ATTACK_PATTERNS = [
@@ -151,6 +157,47 @@ _FUZZY_HARMFUL = _compile_fuzzy_dict(HARMFUL_PATTERNS)
 _COMPILED_FORMAT = [re.compile(p, re.I) for p in FORMAT_PATTERNS]
 
 
+def _has_prompt_injection_intent(normalized: str) -> bool:
+    words = set(re.findall(r"[a-z0-9]+", normalized.lower()))
+    if not words:
+        return False
+
+    if {"ignore", "instructions"}.issubset(words):
+        return True
+    if {"follow", "instructions"}.issubset(words):
+        return True
+    if {"forget", "instructions"}.issubset(words):
+        return True
+    if {"reveal", "system"}.issubset(words) and "prompt" in words:
+        return True
+    if {"show", "system"}.issubset(words) and "prompt" in words:
+        return True
+    if {"tell", "system"}.issubset(words) and "prompt" in words:
+        return True
+    if {"give", "system"}.issubset(words) and "prompt" in words:
+        return True
+    if {"bypass", "rules"}.issubset(words) or {"override", "rules"}.issubset(words):
+        return True
+    if {"bypass", "safety"}.issubset(words) or {"override", "safety"}.issubset(words):
+        return True
+    return False
+
+
+def _has_violent_intent(normalized: str) -> bool:
+    words = set(re.findall(r"[a-z0-9]+", normalized.lower()))
+    if not words:
+        return False
+
+    violent_terms = {"kill", "murder", "stab", "poison", "hurt", "attack", "harm", "injure", "shoot", "destroy", "assault", "torture"}
+    target_terms = {"someone", "person", "people", "them", "him", "her", "you", "victim", "another", "anyone"}
+
+    if violent_terms & words and target_terms & words:
+        return True
+    if {"how", "do", "i"}.issubset(words) and violent_terms & words:
+        return True
+    return False
+
+
 def fallback_safety_check(text: str) -> SafetyResult:
     normalized = normalize_text(text).lower()
 
@@ -172,6 +219,12 @@ def fallback_safety_check(text: str) -> SafetyResult:
             payload_result.backend = "fallback_rules_base64"
             payload_result.reasons.append("base64_payload_decoded_as_unsafe")
             return payload_result
+
+    if _has_prompt_injection_intent(normalized):
+        return SafetyResult("prompt_injection", "block", "high", 0.97, "fallback_rules", ["matched prompt-injection intent heuristics"])
+
+    if _has_violent_intent(normalized):
+        return SafetyResult("violence", "block", "high", 0.96, "fallback_rules", ["matched violent-intent heuristics"])
 
     for raw, pattern in _FUZZY_TECH_ATTACK:
         if pattern.search(normalized):

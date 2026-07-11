@@ -1,10 +1,7 @@
-from pathlib import Path
-
 from guardrail.input_filter import GuardrailSettings, KBAwareInputFilter
 
-kb_text = Path("samples/cybersecurity_kb.txt").read_text(encoding="utf-8")
 settings = GuardrailSettings(enable_hf_models=False, strict_mode=False)
-filter_ = KBAwareInputFilter(kb_text, settings)
+filter_ = KBAwareInputFilter("", settings)
 
 examples = [
     "What is ethical hacking?",

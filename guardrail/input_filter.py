@@ -4,8 +4,6 @@ from typing import Any, Dict, List, Optional
 
 from .audit_logger import append_audit_log
 from .hf_safety import HFModelConfig, HFSafetyEngine
-from .kb_profiler import profile_kb
-from .kb_relevance import KBRelevanceChecker
 from .pii_masker import detect_pii
 from .policy_engine import apply_policy
 from .schema import FilterResult, KBProfile, PIIResult, RelevanceResult, SafetyResult
@@ -35,38 +33,25 @@ class KBAwareInputFilter:
         settings: Optional[GuardrailSettings] = None,
         safety_engine: Optional[HFSafetyEngine] = None,
         kb_profile: Optional[KBProfile] = None,
-        relevance_checker: Optional[KBRelevanceChecker] = None,
+        relevance_checker: Optional[Any] = None,
     ) -> None:
         start_init = time.perf_counter()
 
         self.settings = settings or GuardrailSettings()
         self.kb_text = kb_text or ""
 
-        if kb_profile is not None and relevance_checker is not None:
-            # API path: reuse the profile/index already fitted and cached by
-            # kb_registry.py instead of recomputing them on every request.
+        if kb_profile is not None:
             self.kb_profile = kb_profile
-            self.relevance_checker = relevance_checker
         else:
-            # Streamlit / CLI path: unchanged behaviour, fit fresh each time.
-            start_profile = time.perf_counter()
-            self.kb_profile = profile_kb(self.kb_text)
-            profile_latency = time.perf_counter() - start_profile
-            print(f"[KBAwareInputFilter.__init__] profile_kb latency={profile_latency:.4f} seconds")
+            self.kb_profile = KBProfile(domain="general", confidence=0.0, risk_level="low", matched_terms=[])
 
-            self.relevance_checker = KBRelevanceChecker(
-                relevance_threshold=self.settings.relevance_threshold,
-                grounding_threshold=self.settings.grounding_threshold,
-            )
-            self.relevance_checker.fit(self.kb_text)
+        self.relevance_checker = relevance_checker
 
         if safety_engine is not None:
-            # API path: reuse the one process-wide engine (already warmed up
-            # by api.py's startup event) instead of loading the 3 HF models
-            # again for every tenant KB.
+            # Reuse a shared safety engine when one is provided.
             self.safety_engine = safety_engine
         else:
-            # Streamlit / CLI path: unchanged behaviour, own engine per filter.
+            # Streamlit / CLI path: create an engine per filter.
             hf_config = HFModelConfig(
                 prompt_injection_model=self.settings.prompt_injection_model,
                 moderation_model=self.settings.moderation_model,
@@ -121,8 +106,8 @@ class KBAwareInputFilter:
             )
         events.append({"stage": "safety", "label": safety.label, "decision": safety.decision, "backend": safety.backend})
 
-        # KB relevance runs on sanitized text
-        relevance = self.relevance_checker.check(sanitized)
+        # Relevance against a KB is no longer used in the decision path.
+        relevance = RelevanceResult(False, False, 0.0, [], "disabled")
         events.append({"stage": "kb_relevance", "score": relevance.score, "method": relevance.method})
 
         role = user_role or self.settings.user_role
@@ -132,9 +117,9 @@ class KBAwareInputFilter:
             safety=safety,
             relevance=relevance,
             kb_profile=self.kb_profile,
-            strict_mode=self.settings.strict_mode,
+            strict_mode=False,
             user_role=role,
-            kb_authoritative_mode=self.settings.kb_authoritative_mode,
+            kb_authoritative_mode=False,
             question_text=sanitized,
         )
         latency = time.perf_counter() - start

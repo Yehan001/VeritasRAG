@@ -27,7 +27,7 @@ def _local(folder_name: str) -> str:
 
 @dataclass
 class HFModelConfig:
-    prompt_injection_model: str = _local("protectai__deberta-v3-small-prompt-injection-v2")
+    prompt_injection_model: str = "meta-llama/Llama-Prompt-Guard-2-86M"
     moderation_model: str = _local("oxyapi__albert-moderation-001")
     zero_shot_model: str = _local("cross-encoder__nli-MiniLM2-L6-H768")
     prompt_threshold: float = 0.70

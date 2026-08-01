@@ -8,10 +8,10 @@ st.title("OpenRouter Chatbot")
 st.caption("Chat with the OpenRouter-backed model through a Streamlit interface.")
 st.info("Every message is checked by the InputGuardrail before it is sent to the model.")
 
-client = OpenAI(
-    api_key="",
-    base_url="",
-)
+#client = OpenAI(
+ #   api_key="",
+ #   base_url="",
+#)
 
 # Guardrail instance used to check and sanitize user input before sending to the model
 _guardrail = InputGuardrail()

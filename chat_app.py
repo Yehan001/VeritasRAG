@@ -9,7 +9,7 @@ st.caption("Chat with the OpenRouter-backed model through a Streamlit interface.
 st.info("Every message is checked by the InputGuardrail before it is sent to the model.")
 
 client = OpenAI(
-    api_key="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",
+    api_key="YOUR_API_KEY",
     base_url="https://openrouter.ai/api/v1",
 )
 

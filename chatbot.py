@@ -1,14 +1,24 @@
 from openai import OpenAI
+import os
 
-from guardrail.engine import InputGuardrail
+from guardrail.veritasrag_input_guardrail import InputGuardrail, GuardrailSettings
 
+# Use environment variables for credentials and endpoint (do NOT commit keys to source).
 client = OpenAI(
     api_key="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",
     base_url="https://openrouter.ai/api/v1",
 )
 
 # Guardrail instance used to check and sanitize user input before sending to the model
-_guardrail = InputGuardrail()
+# Lightweight settings by default: disable heavy HF models and Presidio unless available.
+_guardrail = InputGuardrail(
+    GuardrailSettings(
+        enable_hf_models=False,
+        enable_semantic_matcher=True,
+        use_presidio=False,
+        enable_audit_log=False,
+    )
+)
 
 
 def get_ai_response(messages):

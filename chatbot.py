@@ -1,4 +1,5 @@
 import os
+import re
 from dotenv import load_dotenv
 from openai import OpenAI
 
@@ -23,6 +24,16 @@ _guardrail = InputGuardrail(
 
 _KB_PATH = os.path.join(os.path.dirname(__file__), "knowledge_base", "sample_kb.txt")
 
+_CHITCHAT_PATTERNS = re.compile(
+    r"^\s*(hi|hello|hey|good morning|good afternoon|good evening|"
+    r"thanks|thank you|bye|goodbye|how are you|what's up)\s*[!.?]*\s*$",
+    re.I,
+)
+
+
+def _is_chitchat(text: str) -> bool:
+    return bool(_CHITCHAT_PATTERNS.match(text.strip()))
+
 
 def _load_knowledge_base() -> str:
     try:
@@ -45,10 +56,11 @@ def get_ai_response(messages):
     messages[user_idx]["content"] = input_result.sanitized_input
 
     source_text = _load_knowledge_base()
+    is_chitchat = _is_chitchat(messages[user_idx]["content"])
 
-    # 2. Inject KB content so the model actually answers from it,
-    #    instead of guessing from its own general knowledge.
-    if source_text.strip():
+    # 2. Inject KB content ONLY for real questions — chit-chat gets no
+    #    restrictive system prompt, so the model can respond naturally.
+    if source_text.strip() and not is_chitchat:
         context_message = {
             "role": "system",
             "content": (
@@ -70,9 +82,9 @@ def get_ai_response(messages):
     )
     raw_answer = response.choices[0].message.content
 
-    # 4. Output faithfulness check
-    if not source_text.strip():
-        return raw_answer  # no KB yet — skip check, don't block the demo
+    # 4. Output faithfulness check — skip for chit-chat/greetings and when there's no KB yet
+    if not source_text.strip() or is_chitchat:
+        return raw_answer
 
     try:
         faith_result = check_faithfulness(

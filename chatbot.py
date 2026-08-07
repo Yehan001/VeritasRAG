@@ -1,16 +1,17 @@
-from openai import OpenAI
 import os
+from dotenv import load_dotenv
+from openai import OpenAI
 
 from guardrail.veritasrag_input_guardrail import InputGuardrail, GuardrailSettings
+from rag_faithfulness_checker import check_faithfulness
 
-# Use environment variables for credentials and endpoint (do NOT commit keys to source).
+load_dotenv()
+
 client = OpenAI(
-    api_key="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",
+    api_key=os.getenv("OPENROUTER_API_KEY"),
     base_url="https://openrouter.ai/api/v1",
 )
 
-# Guardrail instance used to check and sanitize user input before sending to the model
-# Lightweight settings by default: disable heavy HF models and Presidio unless available.
 _guardrail = InputGuardrail(
     GuardrailSettings(
         enable_hf_models=False,
@@ -20,29 +21,71 @@ _guardrail = InputGuardrail(
     )
 )
 
+_KB_PATH = os.path.join(os.path.dirname(__file__), "knowledge_base", "sample_kb.txt")
+
+
+def _load_knowledge_base() -> str:
+    try:
+        with open(_KB_PATH, "r", encoding="utf-8") as f:
+            return f.read()
+    except FileNotFoundError:
+        return ""
+
 
 def get_ai_response(messages):
-    # Find the last user message and run it through the input guardrail
-    user_idx = None
-    for i in range(len(messages) - 1, -1, -1):
-        try:
-            if messages[i].get("role") == "user":
-                user_idx = i
-                break
-        except Exception:
-            continue
+    user_idx = next((i for i in range(len(messages) - 1, -1, -1)
+                      if messages[i].get("role") == "user"), None)
+    if user_idx is None:
+        return "No user message found."
 
-    if user_idx is not None:
-        user_content = messages[user_idx].get("content", "")
-        result = _guardrail.check(user_content)
-        if result.decision == "BLOCKED":
-            return f"Request blocked: {result.reason}"
-        # Replace the user's content with the sanitized/masked version before calling the model
-        messages[user_idx]["content"] = result.sanitized_input
+    # 1. Input filtering (already working)
+    input_result = _guardrail.check(messages[user_idx].get("content", ""))
+    if input_result.decision == "BLOCKED":
+        return f"Request blocked: {input_result.reason}"
+    messages[user_idx]["content"] = input_result.sanitized_input
 
+    source_text = _load_knowledge_base()
+
+    # 2. Inject KB content so the model actually answers from it,
+    #    instead of guessing from its own general knowledge.
+    if source_text.strip():
+        context_message = {
+            "role": "system",
+            "content": (
+                "Answer the user's question using ONLY the information in the "
+                "context below. If the answer is not in the context, say clearly "
+                "that you don't have that information — do not guess or use "
+                "outside knowledge.\n\n"
+                f"Context:\n{source_text}"
+            ),
+        }
+        messages_for_model = [context_message] + messages
+    else:
+        messages_for_model = messages
+
+    # 3. Get the model's response
     response = client.chat.completions.create(
         model="openai/gpt-4o-mini",
-        messages=messages
+        messages=messages_for_model,
     )
+    raw_answer = response.choices[0].message.content
 
-    return response.choices[0].message.content
+    # 4. Output faithfulness check
+    if not source_text.strip():
+        return raw_answer  # no KB yet — skip check, don't block the demo
+
+    try:
+        faith_result = check_faithfulness(
+            answer=raw_answer,
+            source_text=source_text,
+            api_key=os.getenv("GROQ_API_KEY"),
+            question=messages[user_idx]["content"],
+        )
+    except Exception as e:
+        print(f"Faithfulness check error: {e}")
+        return raw_answer  # fail-open for now — decide as a team if this should fail-closed instead
+
+    if faith_result.verdict == "OUT OF CONTEXT":
+        return "I don't have reliable information on that in my current knowledge base."
+
+    return faith_result.final_answer

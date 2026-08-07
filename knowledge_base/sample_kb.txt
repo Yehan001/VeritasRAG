@@ -1,0 +1,27 @@
+IT Support Knowledge Base — Remote Access
+
+VPN Access
+Employees must use the CompanyVPN client to connect to internal systems from
+outside the office. VPN credentials are separate from your email login and
+must be requested from the IT Helpdesk. VPN sessions automatically time out
+after 8 hours of inactivity.
+
+Password Policy
+Passwords must be at least 12 characters long and include one uppercase
+letter, one number, and one special character. Passwords expire every 90
+days. Employees cannot reuse their last 5 passwords.
+
+Laptop Requests
+New employees receive a company laptop within 3 business days of their
+start date. Laptop requests are submitted through the IT Helpdesk portal,
+not through email.
+
+Help Desk Hours
+The IT Helpdesk is available Monday to Friday, 8:00 AM to 6:00 PM. Outside
+these hours, urgent issues can be reported through the on-call emergency
+line, which is monitored 24/7.
+
+Software Installation
+Employees cannot install unapproved software on company laptops. All
+software requests must go through the IT Helpdesk and be approved by a
+manager before installation.

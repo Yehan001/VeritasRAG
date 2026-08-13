@@ -4,7 +4,8 @@ from collections import Counter
 
 from guardrail import GuardrailSettings, InputGuardrail
 
-DATA = Path("data/eval_cases.csv")
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DATA = PROJECT_ROOT / "data" / "eval_cases.csv"
 
 def main():
     g = InputGuardrail(GuardrailSettings(enable_hf_models=False, enable_sentence_transformer=True, use_presidio=False, enable_audit_log=False))

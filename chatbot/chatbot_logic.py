@@ -1,10 +1,11 @@
 import os
 import re
+from pathlib import Path
 from dotenv import load_dotenv
 from openai import OpenAI
 
 from guardrail.veritasrag_input_guardrail import InputGuardrail, GuardrailSettings
-from rag_faithfulness_checker import check_faithfulness
+from guardrail.faithfulness_checker import check_faithfulness
 
 load_dotenv()
 
@@ -22,7 +23,8 @@ _guardrail = InputGuardrail(
     )
 )
 
-_KB_PATH = os.path.join(os.path.dirname(__file__), "knowledge_base", "sample_kb.txt")
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+_KB_PATH = _PROJECT_ROOT / "knowledge_base" / "sample_kb.txt"
 
 _CHITCHAT_PATTERNS = re.compile(
     r"^\s*(hi|hello|hey|good morning|good afternoon|good evening|"
@@ -37,8 +39,7 @@ def _is_chitchat(text: str) -> bool:
 
 def _load_knowledge_base() -> str:
     try:
-        with open(_KB_PATH, "r", encoding="utf-8") as f:
-            return f.read()
+        return _KB_PATH.read_text(encoding="utf-8")
     except FileNotFoundError:
         return ""
 

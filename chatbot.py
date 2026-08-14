@@ -64,10 +64,12 @@ def get_ai_response(messages):
         context_message = {
             "role": "system",
             "content": (
-                "Answer the user's question using ONLY the information in the "
-                "context below. If the answer is not in the context, say clearly "
-                "that you don't have that information — do not guess or use "
-                "outside knowledge.\n\n"
+                "Answer the user's question using the information in the context "
+                "below. You may combine or reasonably infer from multiple facts "
+                "stated in the context — you don't need an exact literal match. "
+                "Only say you don't have the information if the context genuinely "
+                "doesn't address the topic at all. Do not use outside knowledge "
+                "beyond what's in the context.\n\n"
                 f"Context:\n{source_text}"
             ),
         }

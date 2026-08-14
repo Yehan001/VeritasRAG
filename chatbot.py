@@ -76,6 +76,7 @@ def get_ai_response(messages):
         messages_for_model = messages
 
     # 3. Get the model's response
+    print("Sending to LLM:", messages_for_model)
     response = client.chat.completions.create(
         model="openai/gpt-4o-mini",
         messages=messages_for_model,

@@ -1,16 +1,26 @@
-from transformers import pipeline
-from sentence_transformers import SentenceTransformer
+"""Pre-download local models used by the VeritasRAG input filter.
 
-MODELS = {
-    "prompt_injection": "protectai/deberta-v3-small-prompt-injection-v2",
-    "moderation": "oxyapi/albert-moderation-001",
-    "sentence_transformer": "sentence-transformers/all-MiniLM-L6-v2",
-}
+Run this once after installing requirements to reduce first-request latency.
+The chatbot still works without this script, but enabled local model stages will
+download models lazily the first time they are used.
+"""
 
-print("Downloading prompt-injection model...")
-pipeline("text-classification", model=MODELS["prompt_injection"], tokenizer=MODELS["prompt_injection"])
-print("Downloading moderation model...")
-pipeline("text-classification", model=MODELS["moderation"], tokenizer=MODELS["moderation"], top_k=None)
-print("Downloading SentenceTransformer model...")
-SentenceTransformer(MODELS["sentence_transformer"])
-print("Done.")
+from input_filtering.veritasrag_input_filter import (
+    GuardrailSettings,
+    download_configured_models,
+)
+
+
+def main() -> None:
+    settings = GuardrailSettings(
+        enable_hf_models=True,
+        enable_semantic_matcher=True,
+        use_presidio=False,
+        enable_audit_log=False,
+    )
+    download_configured_models(settings)
+    print("Configured input-filtering models downloaded successfully.")
+
+
+if __name__ == "__main__":
+    main()

@@ -3,8 +3,8 @@ import re
 from dotenv import load_dotenv
 from openai import OpenAI
 
-from guardrail.veritasrag_input_guardrail import InputGuardrail, GuardrailSettings
-from rag_faithfulness_checker import check_faithfulness
+from faithfulness_guardrail.rag_faithfulness_checker import check_faithfulness
+from input_filtering.veritasrag_input_filter import GuardrailSettings, InputGuardrail
 
 load_dotenv()
 
@@ -22,7 +22,9 @@ _guardrail = InputGuardrail(
     )
 )
 
-_KB_PATH = os.path.join(os.path.dirname(__file__), "knowledge_base", "sample_kb.txt")
+_KB_PATH = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "knowledge_base", "sample_kb.txt")
+)
 
 _CHITCHAT_PATTERNS = re.compile(
     r"^\s*(hi|hello|hey|good morning|good afternoon|good evening|"
@@ -78,7 +80,6 @@ def get_ai_response(messages):
         messages_for_model = messages
 
     # 3. Get the model's response
-    print("Sending to LLM:", messages_for_model)
     response = client.chat.completions.create(
         model="openai/gpt-4o-mini",
         messages=messages_for_model,

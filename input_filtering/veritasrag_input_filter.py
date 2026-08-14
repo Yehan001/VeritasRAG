@@ -17,7 +17,7 @@ Pipeline order
 
 Minimal integration
 -------------------
-    from veritasrag_input_guardrail import InputGuardrail, GuardrailSettings
+    from input_filtering.veritasrag_input_filter import InputGuardrail, GuardrailSettings
 
     guardrail = InputGuardrail(GuardrailSettings(
         enable_hf_models=False,          # portable/light deployment

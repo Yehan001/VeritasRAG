@@ -1,5 +1,15 @@
+import sys
+from pathlib import Path
+
+root_dir = Path(__file__).resolve().parent.parent
+if str(root_dir) not in sys.path:
+    sys.path.append(str(root_dir))
+
 import streamlit as st
-from chatbot import get_ai_response
+from chat_logic import get_ai_response
+
+import streamlit as st
+from chat_logic import get_ai_response
 
 st.set_page_config(page_title="AI Chatbot")
 

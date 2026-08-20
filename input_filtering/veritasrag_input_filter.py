@@ -1,4 +1,4 @@
-"""VeritasRAG Input Guardrail - final single-file reusable method.
+"""VeritasRAG Input Filter - final single-file reusable method.
 
 This module consolidates the final VeritasRAG input-filtering package into one importable Python file.
 It performs input filtering only. It does not generate answers, retrieve documents,
@@ -17,7 +17,7 @@ Pipeline order
 
 Minimal integration
 -------------------
-    from veritasrag_input_guardrail import InputGuardrail, GuardrailSettings
+    from veritasrag_input_filter import InputGuardrail, GuardrailSettings
 
     guardrail = InputGuardrail(GuardrailSettings(
         enable_hf_models=False,          # portable/light deployment
